@@ -1,0 +1,29 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { CreditCard } from "lucide-react";
+import { AppShell } from "@/components/layout/AppShell";
+import { PageHeader } from "@/components/ui-kit/PageHeader";
+import { DataTable } from "@/components/ui-kit/DataTable";
+import { FilterBar, FilterSelect } from "@/components/ui-kit/FilterBar";
+
+export const Route = createFileRoute("/payments")({
+  head: () => ({ meta: [{ title: "ငွေပေးချေမှုများ" }] }),
+  component: PaymentsPage,
+});
+
+function PaymentsPage() {
+  return (
+    <AppShell>
+      <PageHeader title="ငွေပေးချေမှုများ" subtitle="ငွေပေးချေမှု မှတ်တမ်းများကို စစ်ဆေးပါ" />
+      <FilterBar>
+        <FilterSelect label="Payment Method" />
+        <FilterSelect label="Status" />
+      </FilterBar>
+      <DataTable
+        columns={["Payment ID", "ကျောင်း", "Amount", "Payment Method", "Transaction No", "Status"]}
+        rows={[]}
+        emptyIcon={CreditCard}
+        emptyTitle="ငွေပေးချေမှု မှတ်တမ်းမရှိသေးပါ"
+      />
+    </AppShell>
+  );
+}
