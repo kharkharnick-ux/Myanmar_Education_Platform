@@ -130,6 +130,13 @@ const validateSchoolImageFile = (file: File, label: string) => {
   }
 };
 
+const getErrorMessage = (error: unknown, fallback: string) =>
+  error instanceof globalThis.Error ? error.message : fallback;
+
+const clearFileInput = (input: HTMLInputElement | null) => {
+  if (input) input.value = "";
+};
+
 function useSchoolImagePreview(path?: string | null) {
   const [previewUrl, setPreviewUrl] = useState("");
 
@@ -312,7 +319,7 @@ function SchoolAdminSidebar() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    navigate({ to: "/auth" });
+    navigate({ to: "/" });
   };
 
   return (
@@ -891,25 +898,28 @@ export function SchoolProfilePage() {
 
       console.log(uploadError);
 
-      if (uploadError) throw uploadError;
+      const uploadedLogoPath = uploadData?.path || "";
+      if (uploadError || !uploadedLogoPath) {
+        throw uploadError ?? new Error("School logo upload result မရရှိပါ။");
+      }
 
       const { error: updateError } = await supabase
         .from("schools")
         .update({
-          logo_url: uploadData.path,
+          logo_url: uploadedLogoPath,
           updated_at: new Date().toISOString(),
         } as never)
         .eq("id", access.school.id);
 
       if (updateError) throw updateError;
 
-      setLogoPath(uploadData.path);
+      setLogoPath(uploadedLogoPath);
       setMessage("School logo ကို သိမ်းဆည်းပြီးပါပြီ။");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "School logo upload လုပ်၍မရပါ။");
+      setErrorMessage(getErrorMessage(error, "School logo upload လုပ်၍မရပါ။"));
     } finally {
       setLogoUploading(false);
-      if (logoInputRef.current) logoInputRef.current.value = "";
+      clearFileInput(logoInputRef.current);
     }
   };
 
@@ -961,25 +971,28 @@ export function SchoolProfilePage() {
 
       console.log(uploadError);
 
-      if (uploadError) throw uploadError;
+      const uploadedCoverPath = uploadData?.path || "";
+      if (uploadError || !uploadedCoverPath) {
+        throw uploadError ?? new Error("Cover image upload result မရရှိပါ။");
+      }
 
       const { error: updateError } = await supabase
         .from("schools")
         .update({
-          cover_image_url: uploadData.path,
+          cover_image_url: uploadedCoverPath,
           updated_at: new Date().toISOString(),
         } as never)
         .eq("id", access.school.id);
 
       if (updateError) throw updateError;
 
-      setCoverPath(uploadData.path);
+      setCoverPath(uploadedCoverPath);
       setMessage("Cover image ကို သိမ်းဆည်းပြီးပါပြီ။");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Cover image upload လုပ်၍မရပါ။");
+      setErrorMessage(getErrorMessage(error, "Cover image upload လုပ်၍မရပါ။"));
     } finally {
       setCoverUploading(false);
-      if (coverInputRef.current) coverInputRef.current.value = "";
+      clearFileInput(coverInputRef.current);
     }
   };
 
@@ -1007,7 +1020,7 @@ export function SchoolProfilePage() {
       .eq("id", access.school.id);
 
     if (error) {
-      setErrorMessage(error.message);
+      setErrorMessage(error?.message ?? "School logo ကို ဖယ်ရှား၍မရပါ။");
     } else {
       setLogoPath(null);
       setLogoPreviewUrl("");
@@ -1041,7 +1054,7 @@ export function SchoolProfilePage() {
       .eq("id", access.school.id);
 
     if (error) {
-      setErrorMessage(error.message);
+      setErrorMessage(error?.message ?? "Cover image ကို ဖယ်ရှား၍မရပါ။");
     } else {
       setCoverPath(null);
       setCoverPreviewUrl("");

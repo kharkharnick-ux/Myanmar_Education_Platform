@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { School as SchoolIcon } from "lucide-react";
+import { Award, Percent, School as SchoolIcon, Star, Trophy } from "lucide-react";
 import { REGIONS, fetchSchools, hasFreshApprovedSchoolsCache, type School } from "@/lib/site-data";
 
 export function SchoolDiscovery({ limit }: { limit?: number }) {
@@ -105,7 +105,17 @@ function SkeletonCard() {
   );
 }
 
+const formatStatNumber = (value: number, maximumFractionDigits = 0) =>
+  new Intl.NumberFormat("en-US", { maximumFractionDigits }).format(value);
+
 function SchoolCard({ school }: { school: School }) {
+  const hasRatingAverage = school.rating_average !== undefined && school.rating_average !== null;
+  const hasRatingCount = school.rating_count !== undefined && school.rating_count !== null;
+  const hasPassRate = school.pass_rate !== undefined && school.pass_rate !== null;
+  const hasDistinctions = typeof school.distinction_count === "number" && school.distinction_count > 0;
+  const hasHighlightBadge = Boolean(school.highlight_badge);
+  const hasStatistics = hasRatingAverage || hasRatingCount || hasPassRate || hasDistinctions || hasHighlightBadge;
+
   return (
     <article className="aqua-card group overflow-hidden transition hover:shadow-[var(--shadow-glow)]">
       <div
@@ -133,6 +143,40 @@ function SchoolCard({ school }: { school: School }) {
           {school.region || "-"} {school.township ? ` / ${school.township}` : ""}
         </p>
         {school.address && <p className="mt-2 line-clamp-2 text-xs text-foreground/75">{school.address}</p>}
+
+        {hasStatistics && (
+          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-foreground/80">
+            {hasRatingAverage && (
+              <div className="glass-panel flex items-center gap-1.5 rounded-xl px-2 py-1.5">
+                <Star className="h-3.5 w-3.5 text-primary" />
+                <span>{formatStatNumber(school.rating_average!, 1)} rating</span>
+              </div>
+            )}
+            {hasRatingCount && (
+              <div className="glass-panel flex items-center gap-1.5 rounded-xl px-2 py-1.5">
+                <Award className="h-3.5 w-3.5 text-primary" />
+                <span>{formatStatNumber(school.rating_count!)} reviews</span>
+              </div>
+            )}
+            {hasPassRate && (
+              <div className="glass-panel flex items-center gap-1.5 rounded-xl px-2 py-1.5">
+                <Percent className="h-3.5 w-3.5 text-primary" />
+                <span>{formatStatNumber(school.pass_rate!, 1)}%</span>
+              </div>
+            )}
+            {hasDistinctions && (
+              <div className="glass-panel flex items-center gap-1.5 rounded-xl px-2 py-1.5">
+                <Trophy className="h-3.5 w-3.5 text-primary" />
+                <span>{formatStatNumber(school.distinction_count!)} distinctions</span>
+              </div>
+            )}
+            {hasHighlightBadge && (
+              <div className="glass-panel col-span-2 rounded-xl px-2 py-1.5 font-medium text-primary">
+                {school.highlight_badge}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="mt-3 space-y-1 text-xs text-foreground/80">
           {school.phone && <p>{school.phone}</p>}

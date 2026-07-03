@@ -19,6 +19,19 @@ type ApprovedSchoolRow = {
   townships?: { name: string | null } | null;
 };
 
+type AcademicYearRow = {
+  id: string;
+};
+
+type SchoolAcademicStatisticRow = {
+  school_id: string;
+  rating_average: number | null;
+  rating_count: number | null;
+  pass_rate: number | null;
+  distinction_count: number | null;
+  highlight_badge: string | null;
+};
+
 export type PublicApprovedSchool = {
   id: string;
   name: string;
@@ -33,6 +46,11 @@ export type PublicApprovedSchool = {
   phone?: string;
   email?: string;
   website?: string;
+  rating_average?: number;
+  rating_count?: number;
+  pass_rate?: number;
+  distinction_count?: number;
+  highlight_badge?: string;
 };
 
 function normalizeSchoolImagePath(path: string) {
@@ -63,6 +81,36 @@ export const getPublicApprovedSchools = createServerFn({ method: "GET" }).handle
 
   if (error) {
     throw error;
+  }
+
+  const schoolRows = (data || []) as ApprovedSchoolRow[];
+  const schoolIds = schoolRows.map((school) => school.id);
+  const statisticsBySchoolId = new Map<string, SchoolAcademicStatisticRow>();
+
+  const { data: activeAcademicYear, error: activeAcademicYearError } = await supabaseAdmin
+    .from("academic_years")
+    .select("id")
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (activeAcademicYearError) {
+    console.error("Failed to fetch active academic year for public schools", activeAcademicYearError);
+  }
+
+  if (schoolIds.length > 0 && activeAcademicYear?.id) {
+    const { data: statisticsRows, error: statisticsError } = await supabaseAdmin
+      .from("school_academic_statistics")
+      .select("school_id, rating_average, rating_count, pass_rate, distinction_count, highlight_badge")
+      .eq("academic_year_id", (activeAcademicYear as AcademicYearRow).id)
+      .in("school_id", schoolIds);
+
+    if (statisticsError) {
+      console.error("Failed to fetch public school academic statistics", statisticsError);
+    } else {
+      ((statisticsRows || []) as SchoolAcademicStatisticRow[]).forEach((statistic) => {
+        statisticsBySchoolId.set(statistic.school_id, statistic);
+      });
+    }
   }
 
   const signSchoolImage = async (path?: string | null) => {
@@ -101,11 +149,12 @@ export const getPublicApprovedSchools = createServerFn({ method: "GET" }).handle
   };
 
   const schools = await Promise.all(
-    ((data || []) as ApprovedSchoolRow[]).map(async (school) => {
+    schoolRows.map(async (school) => {
       const [logoUrl, coverUrl] = await Promise.all([
         signSchoolImage(school.logo_url),
         signSchoolImage(school.cover_image_url),
       ]);
+      const statistic = statisticsBySchoolId.get(school.id);
 
       return {
         id: school.id,
@@ -121,6 +170,11 @@ export const getPublicApprovedSchools = createServerFn({ method: "GET" }).handle
         phone: school.school_phone || undefined,
         email: school.school_email || undefined,
         website: school.website || undefined,
+        rating_average: statistic?.rating_average ?? undefined,
+        rating_count: statistic?.rating_count ?? undefined,
+        pass_rate: statistic?.pass_rate ?? undefined,
+        distinction_count: statistic?.distinction_count ?? undefined,
+        highlight_badge: statistic?.highlight_badge || undefined,
       } satisfies PublicApprovedSchool;
     }),
   );
