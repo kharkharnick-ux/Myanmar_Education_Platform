@@ -14,6 +14,7 @@ import { Route as SuperAdminRouteImport } from './routes/super-admin'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SchoolsRouteImport } from './routes/schools'
 import { Route as SchoolAdminsRouteImport } from './routes/school-admins'
+import { Route as SchoolAdminRouteImport } from './routes/school-admin'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as PaymentsRouteImport } from './routes/payments'
 import { Route as HomepageRouteImport } from './routes/homepage'
@@ -27,11 +28,28 @@ import { Route as SuperAdminSupportRouteImport } from './routes/super-admin.supp
 import { Route as SuperAdminSettingsRouteImport } from './routes/super-admin.settings'
 import { Route as SuperAdminSchoolsRouteImport } from './routes/super-admin.schools'
 import { Route as SuperAdminSchoolAdminsRouteImport } from './routes/super-admin.school-admins'
+import { Route as SuperAdminSchoolAdminApplicationsRouteImport } from './routes/super-admin.school-admin-applications'
 import { Route as SuperAdminReportsRouteImport } from './routes/super-admin.reports'
 import { Route as SuperAdminPaymentsRouteImport } from './routes/super-admin.payments'
 import { Route as SuperAdminApplicationsRouteImport } from './routes/super-admin.applications'
 import { Route as SuperAdminAnnouncementsRouteImport } from './routes/super-admin.announcements'
 import { Route as SuperAdminActivityRouteImport } from './routes/super-admin.activity'
+import { Route as SchoolAdminSettingsRouteImport } from './routes/school-admin.settings'
+import { Route as SchoolAdminSchoolProfileRouteImport } from './routes/school-admin.school-profile'
+import { Route as SchoolAdminReportsRouteImport } from './routes/school-admin.reports'
+import { Route as SchoolAdminReportCardsRouteImport } from './routes/school-admin.report-cards'
+import { Route as SchoolAdminPrincipalManagementRouteImport } from './routes/school-admin.principal-management'
+import { Route as SchoolAdminInstructionsRouteImport } from './routes/school-admin.instructions'
+import { Route as SchoolAdminDocumentsRouteImport } from './routes/school-admin.documents'
+import { Route as SchoolAdminDashboardRouteImport } from './routes/school-admin.dashboard'
+import { Route as SchoolAdminAttendanceRouteImport } from './routes/school-admin.attendance'
+import { Route as SchoolAdminAnalyticsRouteImport } from './routes/school-admin.analytics'
+import { Route as SchoolAdminAcademicRouteImport } from './routes/school-admin.academic'
+import { Route as RegisterSchoolAdminRouteImport } from './routes/register.school-admin'
+import { Route as RegisterSchoolRouteImport } from './routes/register.school'
+import { Route as AuthSetupPasswordRouteImport } from './routes/auth.setup-password'
+import { Route as RegisterSchoolAdminStatusRouteImport } from './routes/register.school-admin.status'
+import { Route as RegisterSchoolAdminPendingRouteImport } from './routes/register.school-admin.pending'
 
 const SupportRoute = SupportRouteImport.update({
   id: '/support',
@@ -56,6 +74,11 @@ const SchoolsRoute = SchoolsRouteImport.update({
 const SchoolAdminsRoute = SchoolAdminsRouteImport.update({
   id: '/school-admins',
   path: '/school-admins',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SchoolAdminRoute = SchoolAdminRouteImport.update({
+  id: '/school-admin',
+  path: '/school-admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ReportsRoute = ReportsRouteImport.update({
@@ -123,6 +146,12 @@ const SuperAdminSchoolAdminsRoute = SuperAdminSchoolAdminsRouteImport.update({
   path: '/school-admins',
   getParentRoute: () => SuperAdminRoute,
 } as any)
+const SuperAdminSchoolAdminApplicationsRoute =
+  SuperAdminSchoolAdminApplicationsRouteImport.update({
+    id: '/school-admin-applications',
+    path: '/school-admin-applications',
+    getParentRoute: () => SuperAdminRoute,
+  } as any)
 const SuperAdminReportsRoute = SuperAdminReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
@@ -148,55 +177,175 @@ const SuperAdminActivityRoute = SuperAdminActivityRouteImport.update({
   path: '/activity',
   getParentRoute: () => SuperAdminRoute,
 } as any)
+const SchoolAdminSettingsRoute = SchoolAdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => SchoolAdminRoute,
+} as any)
+const SchoolAdminSchoolProfileRoute =
+  SchoolAdminSchoolProfileRouteImport.update({
+    id: '/school-profile',
+    path: '/school-profile',
+    getParentRoute: () => SchoolAdminRoute,
+  } as any)
+const SchoolAdminReportsRoute = SchoolAdminReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => SchoolAdminRoute,
+} as any)
+const SchoolAdminReportCardsRoute = SchoolAdminReportCardsRouteImport.update({
+  id: '/report-cards',
+  path: '/report-cards',
+  getParentRoute: () => SchoolAdminRoute,
+} as any)
+const SchoolAdminPrincipalManagementRoute =
+  SchoolAdminPrincipalManagementRouteImport.update({
+    id: '/principal-management',
+    path: '/principal-management',
+    getParentRoute: () => SchoolAdminRoute,
+  } as any)
+const SchoolAdminInstructionsRoute = SchoolAdminInstructionsRouteImport.update({
+  id: '/instructions',
+  path: '/instructions',
+  getParentRoute: () => SchoolAdminRoute,
+} as any)
+const SchoolAdminDocumentsRoute = SchoolAdminDocumentsRouteImport.update({
+  id: '/documents',
+  path: '/documents',
+  getParentRoute: () => SchoolAdminRoute,
+} as any)
+const SchoolAdminDashboardRoute = SchoolAdminDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => SchoolAdminRoute,
+} as any)
+const SchoolAdminAttendanceRoute = SchoolAdminAttendanceRouteImport.update({
+  id: '/attendance',
+  path: '/attendance',
+  getParentRoute: () => SchoolAdminRoute,
+} as any)
+const SchoolAdminAnalyticsRoute = SchoolAdminAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => SchoolAdminRoute,
+} as any)
+const SchoolAdminAcademicRoute = SchoolAdminAcademicRouteImport.update({
+  id: '/academic',
+  path: '/academic',
+  getParentRoute: () => SchoolAdminRoute,
+} as any)
+const RegisterSchoolAdminRoute = RegisterSchoolAdminRouteImport.update({
+  id: '/register/school-admin',
+  path: '/register/school-admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegisterSchoolRoute = RegisterSchoolRouteImport.update({
+  id: '/register/school',
+  path: '/register/school',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthSetupPasswordRoute = AuthSetupPasswordRouteImport.update({
+  id: '/setup-password',
+  path: '/setup-password',
+  getParentRoute: () => AuthRoute,
+} as any)
+const RegisterSchoolAdminStatusRoute =
+  RegisterSchoolAdminStatusRouteImport.update({
+    id: '/status',
+    path: '/status',
+    getParentRoute: () => RegisterSchoolAdminRoute,
+  } as any)
+const RegisterSchoolAdminPendingRoute =
+  RegisterSchoolAdminPendingRouteImport.update({
+    id: '/pending',
+    path: '/pending',
+    getParentRoute: () => RegisterSchoolAdminRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
   '/announcements': typeof AnnouncementsRoute
   '/applications': typeof ApplicationsRoute
-  '/auth': typeof AuthRoute
+  '/auth': typeof AuthRouteWithChildren
   '/homepage': typeof HomepageRoute
   '/payments': typeof PaymentsRoute
   '/reports': typeof ReportsRoute
+  '/school-admin': typeof SchoolAdminRouteWithChildren
   '/school-admins': typeof SchoolAdminsRoute
   '/schools': typeof SchoolsRoute
   '/settings': typeof SettingsRoute
   '/super-admin': typeof SuperAdminRouteWithChildren
   '/support': typeof SupportRoute
+  '/auth/setup-password': typeof AuthSetupPasswordRoute
+  '/register/school': typeof RegisterSchoolRoute
+  '/register/school-admin': typeof RegisterSchoolAdminRouteWithChildren
+  '/school-admin/academic': typeof SchoolAdminAcademicRoute
+  '/school-admin/analytics': typeof SchoolAdminAnalyticsRoute
+  '/school-admin/attendance': typeof SchoolAdminAttendanceRoute
+  '/school-admin/dashboard': typeof SchoolAdminDashboardRoute
+  '/school-admin/documents': typeof SchoolAdminDocumentsRoute
+  '/school-admin/instructions': typeof SchoolAdminInstructionsRoute
+  '/school-admin/principal-management': typeof SchoolAdminPrincipalManagementRoute
+  '/school-admin/report-cards': typeof SchoolAdminReportCardsRoute
+  '/school-admin/reports': typeof SchoolAdminReportsRoute
+  '/school-admin/school-profile': typeof SchoolAdminSchoolProfileRoute
+  '/school-admin/settings': typeof SchoolAdminSettingsRoute
   '/super-admin/activity': typeof SuperAdminActivityRoute
   '/super-admin/announcements': typeof SuperAdminAnnouncementsRoute
   '/super-admin/applications': typeof SuperAdminApplicationsRoute
   '/super-admin/payments': typeof SuperAdminPaymentsRoute
   '/super-admin/reports': typeof SuperAdminReportsRoute
+  '/super-admin/school-admin-applications': typeof SuperAdminSchoolAdminApplicationsRoute
   '/super-admin/school-admins': typeof SuperAdminSchoolAdminsRoute
   '/super-admin/schools': typeof SuperAdminSchoolsRoute
   '/super-admin/settings': typeof SuperAdminSettingsRoute
   '/super-admin/support': typeof SuperAdminSupportRoute
   '/super-admin/': typeof SuperAdminIndexRoute
+  '/register/school-admin/pending': typeof RegisterSchoolAdminPendingRoute
+  '/register/school-admin/status': typeof RegisterSchoolAdminStatusRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
   '/announcements': typeof AnnouncementsRoute
   '/applications': typeof ApplicationsRoute
-  '/auth': typeof AuthRoute
+  '/auth': typeof AuthRouteWithChildren
   '/homepage': typeof HomepageRoute
   '/payments': typeof PaymentsRoute
   '/reports': typeof ReportsRoute
+  '/school-admin': typeof SchoolAdminRouteWithChildren
   '/school-admins': typeof SchoolAdminsRoute
   '/schools': typeof SchoolsRoute
   '/settings': typeof SettingsRoute
   '/support': typeof SupportRoute
+  '/auth/setup-password': typeof AuthSetupPasswordRoute
+  '/register/school': typeof RegisterSchoolRoute
+  '/register/school-admin': typeof RegisterSchoolAdminRouteWithChildren
+  '/school-admin/academic': typeof SchoolAdminAcademicRoute
+  '/school-admin/analytics': typeof SchoolAdminAnalyticsRoute
+  '/school-admin/attendance': typeof SchoolAdminAttendanceRoute
+  '/school-admin/dashboard': typeof SchoolAdminDashboardRoute
+  '/school-admin/documents': typeof SchoolAdminDocumentsRoute
+  '/school-admin/instructions': typeof SchoolAdminInstructionsRoute
+  '/school-admin/principal-management': typeof SchoolAdminPrincipalManagementRoute
+  '/school-admin/report-cards': typeof SchoolAdminReportCardsRoute
+  '/school-admin/reports': typeof SchoolAdminReportsRoute
+  '/school-admin/school-profile': typeof SchoolAdminSchoolProfileRoute
+  '/school-admin/settings': typeof SchoolAdminSettingsRoute
   '/super-admin/activity': typeof SuperAdminActivityRoute
   '/super-admin/announcements': typeof SuperAdminAnnouncementsRoute
   '/super-admin/applications': typeof SuperAdminApplicationsRoute
   '/super-admin/payments': typeof SuperAdminPaymentsRoute
   '/super-admin/reports': typeof SuperAdminReportsRoute
+  '/super-admin/school-admin-applications': typeof SuperAdminSchoolAdminApplicationsRoute
   '/super-admin/school-admins': typeof SuperAdminSchoolAdminsRoute
   '/super-admin/schools': typeof SuperAdminSchoolsRoute
   '/super-admin/settings': typeof SuperAdminSettingsRoute
   '/super-admin/support': typeof SuperAdminSupportRoute
   '/super-admin': typeof SuperAdminIndexRoute
+  '/register/school-admin/pending': typeof RegisterSchoolAdminPendingRoute
+  '/register/school-admin/status': typeof RegisterSchoolAdminStatusRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -204,25 +353,43 @@ export interface FileRoutesById {
   '/activity': typeof ActivityRoute
   '/announcements': typeof AnnouncementsRoute
   '/applications': typeof ApplicationsRoute
-  '/auth': typeof AuthRoute
+  '/auth': typeof AuthRouteWithChildren
   '/homepage': typeof HomepageRoute
   '/payments': typeof PaymentsRoute
   '/reports': typeof ReportsRoute
+  '/school-admin': typeof SchoolAdminRouteWithChildren
   '/school-admins': typeof SchoolAdminsRoute
   '/schools': typeof SchoolsRoute
   '/settings': typeof SettingsRoute
   '/super-admin': typeof SuperAdminRouteWithChildren
   '/support': typeof SupportRoute
+  '/auth/setup-password': typeof AuthSetupPasswordRoute
+  '/register/school': typeof RegisterSchoolRoute
+  '/register/school-admin': typeof RegisterSchoolAdminRouteWithChildren
+  '/school-admin/academic': typeof SchoolAdminAcademicRoute
+  '/school-admin/analytics': typeof SchoolAdminAnalyticsRoute
+  '/school-admin/attendance': typeof SchoolAdminAttendanceRoute
+  '/school-admin/dashboard': typeof SchoolAdminDashboardRoute
+  '/school-admin/documents': typeof SchoolAdminDocumentsRoute
+  '/school-admin/instructions': typeof SchoolAdminInstructionsRoute
+  '/school-admin/principal-management': typeof SchoolAdminPrincipalManagementRoute
+  '/school-admin/report-cards': typeof SchoolAdminReportCardsRoute
+  '/school-admin/reports': typeof SchoolAdminReportsRoute
+  '/school-admin/school-profile': typeof SchoolAdminSchoolProfileRoute
+  '/school-admin/settings': typeof SchoolAdminSettingsRoute
   '/super-admin/activity': typeof SuperAdminActivityRoute
   '/super-admin/announcements': typeof SuperAdminAnnouncementsRoute
   '/super-admin/applications': typeof SuperAdminApplicationsRoute
   '/super-admin/payments': typeof SuperAdminPaymentsRoute
   '/super-admin/reports': typeof SuperAdminReportsRoute
+  '/super-admin/school-admin-applications': typeof SuperAdminSchoolAdminApplicationsRoute
   '/super-admin/school-admins': typeof SuperAdminSchoolAdminsRoute
   '/super-admin/schools': typeof SuperAdminSchoolsRoute
   '/super-admin/settings': typeof SuperAdminSettingsRoute
   '/super-admin/support': typeof SuperAdminSupportRoute
   '/super-admin/': typeof SuperAdminIndexRoute
+  '/register/school-admin/pending': typeof RegisterSchoolAdminPendingRoute
+  '/register/school-admin/status': typeof RegisterSchoolAdminStatusRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -235,21 +402,39 @@ export interface FileRouteTypes {
     | '/homepage'
     | '/payments'
     | '/reports'
+    | '/school-admin'
     | '/school-admins'
     | '/schools'
     | '/settings'
     | '/super-admin'
     | '/support'
+    | '/auth/setup-password'
+    | '/register/school'
+    | '/register/school-admin'
+    | '/school-admin/academic'
+    | '/school-admin/analytics'
+    | '/school-admin/attendance'
+    | '/school-admin/dashboard'
+    | '/school-admin/documents'
+    | '/school-admin/instructions'
+    | '/school-admin/principal-management'
+    | '/school-admin/report-cards'
+    | '/school-admin/reports'
+    | '/school-admin/school-profile'
+    | '/school-admin/settings'
     | '/super-admin/activity'
     | '/super-admin/announcements'
     | '/super-admin/applications'
     | '/super-admin/payments'
     | '/super-admin/reports'
+    | '/super-admin/school-admin-applications'
     | '/super-admin/school-admins'
     | '/super-admin/schools'
     | '/super-admin/settings'
     | '/super-admin/support'
     | '/super-admin/'
+    | '/register/school-admin/pending'
+    | '/register/school-admin/status'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -260,20 +445,38 @@ export interface FileRouteTypes {
     | '/homepage'
     | '/payments'
     | '/reports'
+    | '/school-admin'
     | '/school-admins'
     | '/schools'
     | '/settings'
     | '/support'
+    | '/auth/setup-password'
+    | '/register/school'
+    | '/register/school-admin'
+    | '/school-admin/academic'
+    | '/school-admin/analytics'
+    | '/school-admin/attendance'
+    | '/school-admin/dashboard'
+    | '/school-admin/documents'
+    | '/school-admin/instructions'
+    | '/school-admin/principal-management'
+    | '/school-admin/report-cards'
+    | '/school-admin/reports'
+    | '/school-admin/school-profile'
+    | '/school-admin/settings'
     | '/super-admin/activity'
     | '/super-admin/announcements'
     | '/super-admin/applications'
     | '/super-admin/payments'
     | '/super-admin/reports'
+    | '/super-admin/school-admin-applications'
     | '/super-admin/school-admins'
     | '/super-admin/schools'
     | '/super-admin/settings'
     | '/super-admin/support'
     | '/super-admin'
+    | '/register/school-admin/pending'
+    | '/register/school-admin/status'
   id:
     | '__root__'
     | '/'
@@ -284,21 +487,39 @@ export interface FileRouteTypes {
     | '/homepage'
     | '/payments'
     | '/reports'
+    | '/school-admin'
     | '/school-admins'
     | '/schools'
     | '/settings'
     | '/super-admin'
     | '/support'
+    | '/auth/setup-password'
+    | '/register/school'
+    | '/register/school-admin'
+    | '/school-admin/academic'
+    | '/school-admin/analytics'
+    | '/school-admin/attendance'
+    | '/school-admin/dashboard'
+    | '/school-admin/documents'
+    | '/school-admin/instructions'
+    | '/school-admin/principal-management'
+    | '/school-admin/report-cards'
+    | '/school-admin/reports'
+    | '/school-admin/school-profile'
+    | '/school-admin/settings'
     | '/super-admin/activity'
     | '/super-admin/announcements'
     | '/super-admin/applications'
     | '/super-admin/payments'
     | '/super-admin/reports'
+    | '/super-admin/school-admin-applications'
     | '/super-admin/school-admins'
     | '/super-admin/schools'
     | '/super-admin/settings'
     | '/super-admin/support'
     | '/super-admin/'
+    | '/register/school-admin/pending'
+    | '/register/school-admin/status'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -306,15 +527,18 @@ export interface RootRouteChildren {
   ActivityRoute: typeof ActivityRoute
   AnnouncementsRoute: typeof AnnouncementsRoute
   ApplicationsRoute: typeof ApplicationsRoute
-  AuthRoute: typeof AuthRoute
+  AuthRoute: typeof AuthRouteWithChildren
   HomepageRoute: typeof HomepageRoute
   PaymentsRoute: typeof PaymentsRoute
   ReportsRoute: typeof ReportsRoute
+  SchoolAdminRoute: typeof SchoolAdminRouteWithChildren
   SchoolAdminsRoute: typeof SchoolAdminsRoute
   SchoolsRoute: typeof SchoolsRoute
   SettingsRoute: typeof SettingsRoute
   SuperAdminRoute: typeof SuperAdminRouteWithChildren
   SupportRoute: typeof SupportRoute
+  RegisterSchoolRoute: typeof RegisterSchoolRoute
+  RegisterSchoolAdminRoute: typeof RegisterSchoolAdminRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -352,6 +576,13 @@ declare module '@tanstack/react-router' {
       path: '/school-admins'
       fullPath: '/school-admins'
       preLoaderRoute: typeof SchoolAdminsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/school-admin': {
+      id: '/school-admin'
+      path: '/school-admin'
+      fullPath: '/school-admin'
+      preLoaderRoute: typeof SchoolAdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/reports': {
@@ -445,6 +676,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SuperAdminSchoolAdminsRouteImport
       parentRoute: typeof SuperAdminRoute
     }
+    '/super-admin/school-admin-applications': {
+      id: '/super-admin/school-admin-applications'
+      path: '/school-admin-applications'
+      fullPath: '/super-admin/school-admin-applications'
+      preLoaderRoute: typeof SuperAdminSchoolAdminApplicationsRouteImport
+      parentRoute: typeof SuperAdminRoute
+    }
     '/super-admin/reports': {
       id: '/super-admin/reports'
       path: '/reports'
@@ -480,8 +718,162 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SuperAdminActivityRouteImport
       parentRoute: typeof SuperAdminRoute
     }
+    '/school-admin/settings': {
+      id: '/school-admin/settings'
+      path: '/settings'
+      fullPath: '/school-admin/settings'
+      preLoaderRoute: typeof SchoolAdminSettingsRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/school-profile': {
+      id: '/school-admin/school-profile'
+      path: '/school-profile'
+      fullPath: '/school-admin/school-profile'
+      preLoaderRoute: typeof SchoolAdminSchoolProfileRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/reports': {
+      id: '/school-admin/reports'
+      path: '/reports'
+      fullPath: '/school-admin/reports'
+      preLoaderRoute: typeof SchoolAdminReportsRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/report-cards': {
+      id: '/school-admin/report-cards'
+      path: '/report-cards'
+      fullPath: '/school-admin/report-cards'
+      preLoaderRoute: typeof SchoolAdminReportCardsRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/principal-management': {
+      id: '/school-admin/principal-management'
+      path: '/principal-management'
+      fullPath: '/school-admin/principal-management'
+      preLoaderRoute: typeof SchoolAdminPrincipalManagementRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/instructions': {
+      id: '/school-admin/instructions'
+      path: '/instructions'
+      fullPath: '/school-admin/instructions'
+      preLoaderRoute: typeof SchoolAdminInstructionsRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/documents': {
+      id: '/school-admin/documents'
+      path: '/documents'
+      fullPath: '/school-admin/documents'
+      preLoaderRoute: typeof SchoolAdminDocumentsRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/dashboard': {
+      id: '/school-admin/dashboard'
+      path: '/dashboard'
+      fullPath: '/school-admin/dashboard'
+      preLoaderRoute: typeof SchoolAdminDashboardRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/attendance': {
+      id: '/school-admin/attendance'
+      path: '/attendance'
+      fullPath: '/school-admin/attendance'
+      preLoaderRoute: typeof SchoolAdminAttendanceRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/analytics': {
+      id: '/school-admin/analytics'
+      path: '/analytics'
+      fullPath: '/school-admin/analytics'
+      preLoaderRoute: typeof SchoolAdminAnalyticsRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/school-admin/academic': {
+      id: '/school-admin/academic'
+      path: '/academic'
+      fullPath: '/school-admin/academic'
+      preLoaderRoute: typeof SchoolAdminAcademicRouteImport
+      parentRoute: typeof SchoolAdminRoute
+    }
+    '/register/school-admin': {
+      id: '/register/school-admin'
+      path: '/register/school-admin'
+      fullPath: '/register/school-admin'
+      preLoaderRoute: typeof RegisterSchoolAdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/register/school': {
+      id: '/register/school'
+      path: '/register/school'
+      fullPath: '/register/school'
+      preLoaderRoute: typeof RegisterSchoolRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth/setup-password': {
+      id: '/auth/setup-password'
+      path: '/setup-password'
+      fullPath: '/auth/setup-password'
+      preLoaderRoute: typeof AuthSetupPasswordRouteImport
+      parentRoute: typeof AuthRoute
+    }
+    '/register/school-admin/status': {
+      id: '/register/school-admin/status'
+      path: '/status'
+      fullPath: '/register/school-admin/status'
+      preLoaderRoute: typeof RegisterSchoolAdminStatusRouteImport
+      parentRoute: typeof RegisterSchoolAdminRoute
+    }
+    '/register/school-admin/pending': {
+      id: '/register/school-admin/pending'
+      path: '/pending'
+      fullPath: '/register/school-admin/pending'
+      preLoaderRoute: typeof RegisterSchoolAdminPendingRouteImport
+      parentRoute: typeof RegisterSchoolAdminRoute
+    }
   }
 }
+
+interface AuthRouteChildren {
+  AuthSetupPasswordRoute: typeof AuthSetupPasswordRoute
+}
+
+const AuthRouteChildren: AuthRouteChildren = {
+  AuthSetupPasswordRoute: AuthSetupPasswordRoute,
+}
+
+const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
+
+interface SchoolAdminRouteChildren {
+  SchoolAdminAcademicRoute: typeof SchoolAdminAcademicRoute
+  SchoolAdminAnalyticsRoute: typeof SchoolAdminAnalyticsRoute
+  SchoolAdminAttendanceRoute: typeof SchoolAdminAttendanceRoute
+  SchoolAdminDashboardRoute: typeof SchoolAdminDashboardRoute
+  SchoolAdminDocumentsRoute: typeof SchoolAdminDocumentsRoute
+  SchoolAdminInstructionsRoute: typeof SchoolAdminInstructionsRoute
+  SchoolAdminPrincipalManagementRoute: typeof SchoolAdminPrincipalManagementRoute
+  SchoolAdminReportCardsRoute: typeof SchoolAdminReportCardsRoute
+  SchoolAdminReportsRoute: typeof SchoolAdminReportsRoute
+  SchoolAdminSchoolProfileRoute: typeof SchoolAdminSchoolProfileRoute
+  SchoolAdminSettingsRoute: typeof SchoolAdminSettingsRoute
+}
+
+const SchoolAdminRouteChildren: SchoolAdminRouteChildren = {
+  SchoolAdminAcademicRoute: SchoolAdminAcademicRoute,
+  SchoolAdminAnalyticsRoute: SchoolAdminAnalyticsRoute,
+  SchoolAdminAttendanceRoute: SchoolAdminAttendanceRoute,
+  SchoolAdminDashboardRoute: SchoolAdminDashboardRoute,
+  SchoolAdminDocumentsRoute: SchoolAdminDocumentsRoute,
+  SchoolAdminInstructionsRoute: SchoolAdminInstructionsRoute,
+  SchoolAdminPrincipalManagementRoute: SchoolAdminPrincipalManagementRoute,
+  SchoolAdminReportCardsRoute: SchoolAdminReportCardsRoute,
+  SchoolAdminReportsRoute: SchoolAdminReportsRoute,
+  SchoolAdminSchoolProfileRoute: SchoolAdminSchoolProfileRoute,
+  SchoolAdminSettingsRoute: SchoolAdminSettingsRoute,
+}
+
+const SchoolAdminRouteWithChildren = SchoolAdminRoute._addFileChildren(
+  SchoolAdminRouteChildren,
+)
 
 interface SuperAdminRouteChildren {
   SuperAdminActivityRoute: typeof SuperAdminActivityRoute
@@ -489,6 +881,7 @@ interface SuperAdminRouteChildren {
   SuperAdminApplicationsRoute: typeof SuperAdminApplicationsRoute
   SuperAdminPaymentsRoute: typeof SuperAdminPaymentsRoute
   SuperAdminReportsRoute: typeof SuperAdminReportsRoute
+  SuperAdminSchoolAdminApplicationsRoute: typeof SuperAdminSchoolAdminApplicationsRoute
   SuperAdminSchoolAdminsRoute: typeof SuperAdminSchoolAdminsRoute
   SuperAdminSchoolsRoute: typeof SuperAdminSchoolsRoute
   SuperAdminSettingsRoute: typeof SuperAdminSettingsRoute
@@ -502,6 +895,8 @@ const SuperAdminRouteChildren: SuperAdminRouteChildren = {
   SuperAdminApplicationsRoute: SuperAdminApplicationsRoute,
   SuperAdminPaymentsRoute: SuperAdminPaymentsRoute,
   SuperAdminReportsRoute: SuperAdminReportsRoute,
+  SuperAdminSchoolAdminApplicationsRoute:
+    SuperAdminSchoolAdminApplicationsRoute,
   SuperAdminSchoolAdminsRoute: SuperAdminSchoolAdminsRoute,
   SuperAdminSchoolsRoute: SuperAdminSchoolsRoute,
   SuperAdminSettingsRoute: SuperAdminSettingsRoute,
@@ -513,20 +908,36 @@ const SuperAdminRouteWithChildren = SuperAdminRoute._addFileChildren(
   SuperAdminRouteChildren,
 )
 
+interface RegisterSchoolAdminRouteChildren {
+  RegisterSchoolAdminPendingRoute: typeof RegisterSchoolAdminPendingRoute
+  RegisterSchoolAdminStatusRoute: typeof RegisterSchoolAdminStatusRoute
+}
+
+const RegisterSchoolAdminRouteChildren: RegisterSchoolAdminRouteChildren = {
+  RegisterSchoolAdminPendingRoute: RegisterSchoolAdminPendingRoute,
+  RegisterSchoolAdminStatusRoute: RegisterSchoolAdminStatusRoute,
+}
+
+const RegisterSchoolAdminRouteWithChildren =
+  RegisterSchoolAdminRoute._addFileChildren(RegisterSchoolAdminRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityRoute: ActivityRoute,
   AnnouncementsRoute: AnnouncementsRoute,
   ApplicationsRoute: ApplicationsRoute,
-  AuthRoute: AuthRoute,
+  AuthRoute: AuthRouteWithChildren,
   HomepageRoute: HomepageRoute,
   PaymentsRoute: PaymentsRoute,
   ReportsRoute: ReportsRoute,
+  SchoolAdminRoute: SchoolAdminRouteWithChildren,
   SchoolAdminsRoute: SchoolAdminsRoute,
   SchoolsRoute: SchoolsRoute,
   SettingsRoute: SettingsRoute,
   SuperAdminRoute: SuperAdminRouteWithChildren,
   SupportRoute: SupportRoute,
+  RegisterSchoolRoute: RegisterSchoolRoute,
+  RegisterSchoolAdminRoute: RegisterSchoolAdminRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

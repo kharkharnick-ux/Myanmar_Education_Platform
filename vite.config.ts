@@ -5,11 +5,30 @@
 //     error logger plugins, and sandbox detection (port/host/strictPort).
 // You can pass additional config via defineConfig({ vite: { ... }, etc... }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+import { loadEnv } from "vite";
 
-export default defineConfig({
-  tanstackStart: {
-    // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
-    // nitro/vite builds from this
-    server: { entry: "server" },
-  },
+const loadServerEnvForLocalDev = (mode: string) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const serverOnlyKeys = [
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+  ] as const;
+
+  for (const key of serverOnlyKeys) {
+    if (!process.env[key] && env[key]) {
+      process.env[key] = env[key];
+    }
+  }
+};
+
+export default defineConfig(({ mode }) => {
+  loadServerEnvForLocalDev(mode);
+
+  return {
+    tanstackStart: {
+      // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
+      // nitro/vite builds from this
+      server: { entry: "server" },
+    },
+  };
 });

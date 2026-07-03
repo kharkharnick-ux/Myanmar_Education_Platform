@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, type FormEvent } from "react";
+import { createFileRoute, Link, Outlet, useLocation } from "@tanstack/react-router";
+import { useEffect, useState, type FormEvent } from "react";
 import { Logo } from "@/components/site/Logo";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "@tanstack/react-router";
@@ -21,8 +21,18 @@ export const Route = createFileRoute("/auth")({
       },
     ],
   }),
-  component: AuthPage,
+  component: AuthRouteComponent,
 });
+
+function AuthRouteComponent() {
+  const location = useLocation();
+
+  if (location.pathname !== "/auth") {
+    return <Outlet />;
+  }
+
+  return <AuthPage />;
+}
 
 function AuthPage() {
   const [email, setEmail] = useState("");
@@ -30,12 +40,22 @@ function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const navigate = useNavigate();
   const { theme, mounted } = useTheme();
+
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("password_created") === "1") {
+    setSuccessMessage("Password သတ်မှတ်ပြီးပါပြီ။ ယခု သင့် email နှင့် password ဖြင့် login ဝင်နိုင်ပါသည်။");
+    window.history.replaceState(null, "", "/auth");
+  }
+}, []);
 
 async function handleSubmit(e: FormEvent) {
   e.preventDefault();
   setError(null);
+  setSuccessMessage(null);
 
   if (!email.trim() || !password) {
     setError("ကျေးဇူးပြု၍ Email နှင့် Password ထည့်ပါ။");
@@ -52,8 +72,23 @@ async function handleSubmit(e: FormEvent) {
 
     if (error) throw error;
 
+    const { data: profile } = data.user
+      ? await supabase
+          .from("profiles")
+          .select("role, status")
+          .eq("id", data.user.id)
+          .maybeSingle()
+      : { data: null };
+
+    if (profile?.role === "school_admin") {
+      navigate({
+        to: "/school-admin",
+      });
+      return;
+    }
+
     navigate({
-      to: "/super-admin",
+      to: profile?.role === "super_admin" ? "/super-admin" : "/school-admin",
     });
 
   } catch (err) {
@@ -69,7 +104,7 @@ async function handleSubmit(e: FormEvent) {
 }
 
   return (
-    <main className="min-h-screen w-full">
+    <main className="aqua-page w-full">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10">
         {/* Top bar */}
         <div className="mb-8 flex items-center justify-between">
@@ -120,7 +155,7 @@ async function handleSubmit(e: FormEvent) {
 
           {/* Login form */}
           <section className="order-2 lg:order-1 lg:col-span-2">
-            <div className="glass-strong p-6 sm:p-8">
+            <div className="aqua-card p-6 sm:p-8">
               <div className="mb-6">
                 <h1 className="text-2xl font-bold text-foreground sm:text-3xl">
                   ဝင်ရောက်ရန်
@@ -142,7 +177,7 @@ async function handleSubmit(e: FormEvent) {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="you@example.com"
-                    className="w-full rounded-xl border border-border bg-background/40 px-4 py-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-transparent focus:glow-ring"
+                    className="aqua-input w-full rounded-xl px-4 py-3 text-sm outline-none transition placeholder:text-muted-foreground focus:border-transparent focus:glow-ring"
                   />
                 </div>
 
@@ -158,7 +193,7 @@ async function handleSubmit(e: FormEvent) {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full rounded-xl border border-border bg-background/40 px-4 py-3 pr-12 text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-transparent focus:glow-ring"
+                      className="aqua-input w-full rounded-xl px-4 py-3 pr-12 text-sm outline-none transition placeholder:text-muted-foreground focus:border-transparent focus:glow-ring"
                     />
                     <button
                       type="button"
@@ -192,10 +227,16 @@ async function handleSubmit(e: FormEvent) {
                   </div>
                 )}
 
+                {successMessage && (
+                  <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600 dark:text-emerald-300">
+                    {successMessage}
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   disabled={loading}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-[var(--shadow-glow)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="aqua-button inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loading ? (
                     <>

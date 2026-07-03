@@ -1,12 +1,6 @@
-export type School = {
-  id: string;
-  name: string;
-  logoUrl?: string;
-  coverUrl?: string;
-  region: string;
-  rating: number;
-  passRate: number;
-};
+import { getPublicApprovedSchools, type PublicApprovedSchool } from "@/lib/api/public-schools.functions";
+
+export type School = PublicApprovedSchool;
 
 export type Announcement = {
   id: string;
@@ -16,30 +10,61 @@ export type Announcement = {
   summary: string;
 };
 
-export const REGIONS = [
-  "အားလုံး",
-  "ကချင်ပြည်နယ်",
-  "ကယားပြည်နယ်",
-  "ကရင်ပြည်နယ်",
-  "ချင်းပြည်နယ်",
-  "စစ်ကိုင်းတိုင်း",
-  "တနင်္သာရီတိုင်း",
-  "ပဲခူးတိုင်း",
-  "မကွေးတိုင်း",
-  "မန္တလေးတိုင်း",
-  "မွန်ပြည်နယ်",
-  "ရခိုင်ပြည်နယ်",
-  "ရန်ကုန်တိုင်း",
-  "ရှမ်းမြောက်",
-  "ရှမ်းတောင်",
-  "ရှမ်းအရှေ့",
-  "ဧရာဝတီတိုင်း",
-  "နေပြည်တော်",
-] as const;
+export const ALL_REGIONS = "အားလုံး";
 
-// Backend-ready: replace with real fetch (Supabase) later.
-export async function fetchSchools(_region: string): Promise<School[]> {
-  return [];
+export const REGIONS = [ALL_REGIONS] as const;
+
+const APPROVED_SCHOOLS_CACHE_MS = 30 * 1000;
+
+let approvedSchoolsCache: { data: School[]; expiresAt: number } | null = null;
+let approvedSchoolsRequest: Promise<School[]> | null = null;
+
+async function getCachedApprovedSchools() {
+  const now = Date.now();
+
+  if (approvedSchoolsCache && approvedSchoolsCache.expiresAt > now) {
+    return approvedSchoolsCache.data;
+  }
+
+  if (approvedSchoolsRequest) {
+    return approvedSchoolsRequest;
+  }
+
+  approvedSchoolsRequest = getPublicApprovedSchools()
+    .then((schools) => {
+      approvedSchoolsCache = {
+        data: schools,
+        expiresAt: Date.now() + APPROVED_SCHOOLS_CACHE_MS,
+      };
+      return schools;
+    })
+    .finally(() => {
+      approvedSchoolsRequest = null;
+    });
+
+  return approvedSchoolsRequest;
+}
+
+export function hasFreshApprovedSchoolsCache() {
+  return Boolean(approvedSchoolsCache && approvedSchoolsCache.expiresAt > Date.now());
+}
+
+export async function fetchSchools(region: string): Promise<School[]> {
+  const startedAt = performance.now();
+  const schools = await getCachedApprovedSchools();
+
+  if (import.meta.env.DEV) {
+    console.log("Approved schools fetch duration", {
+      durationMs: Math.round(performance.now() - startedAt),
+      cached: Boolean(approvedSchoolsCache && approvedSchoolsCache.expiresAt > Date.now()),
+      count: schools.length,
+    });
+  }
+
+  return schools.filter((school) => {
+    if (!region || region === ALL_REGIONS) return true;
+    return school.region === region;
+  });
 }
 
 export async function fetchAnnouncements(): Promise<Announcement[]> {

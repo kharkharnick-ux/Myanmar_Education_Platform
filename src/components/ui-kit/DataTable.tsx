@@ -13,8 +13,8 @@ export function DataTable({
 }) {
   if (rows.length === 0) {
     return (
-      <div className="glass overflow-hidden">
-        <div className="hidden md:grid border-b border-white/10 px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider"
+      <div className="aqua-card overflow-hidden">
+        <div className="hidden md:grid border-b border-border bg-accent/20 px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider"
              style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
           {columns.map((c) => <div key={c} className="truncate">{c}</div>)}
         </div>
@@ -25,11 +25,11 @@ export function DataTable({
     );
   }
   return (
-    <div className="glass overflow-hidden">
+    <div className="aqua-card overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-white/10">
+            <tr className="border-b border-border bg-accent/20">
               {columns.map((c) => (
                 <th key={c} className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">{c}</th>
               ))}
@@ -37,7 +37,7 @@ export function DataTable({
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+              <tr key={i} className="border-b border-border/60 transition-colors hover:bg-accent/35">
                 {r.map((cell, j) => <td key={j} className="px-5 py-3">{cell}</td>)}
               </tr>
             ))}

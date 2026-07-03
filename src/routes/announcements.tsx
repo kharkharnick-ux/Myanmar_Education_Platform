@@ -19,15 +19,15 @@ export const Route = createFileRoute("/announcements")({
 
 function AnnouncementsPage() {
   return (
-    <div className="min-h-screen">
+    <div className="aqua-page">
       <SiteHeader />
       <main className="py-20">
         <div className="container">
           <div className="mb-12 text-center">
-            <div className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-primary/10 text-primary">
+            <div className="gloss-highlight mx-auto mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-primary/10 text-primary glow-ring">
               <Megaphone className="h-8 w-8" />
             </div>
-            <h1 className="text-4xl font-bold glow-text mb-4">ကြေညာချက်များ</h1>
+            <h1 className="aqua-section-title mb-4 text-4xl">ကြေညာချက်များ</h1>
             <p className="text-muted-foreground max-w-2xl mx-auto">နောက်ဆုံးရရှိသော သတင်းအချက်အလက်များကို တစ်နေရာတည်းတွင် ကြည့်ရှုနိုင်ပါသည်။</p>
           </div>
           <Announcements />

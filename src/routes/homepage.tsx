@@ -28,11 +28,11 @@ export const Route = createFileRoute("/homepage")({
 
 function HomePage() {
   return (
-    <div className="min-h-screen">
+    <div className="aqua-page">
       <SiteHeader />
       <main>
         <Hero />
-        <SchoolDiscovery />
+        <SchoolDiscovery limit={4} />
         <Features />
         <Announcements />
       </main>

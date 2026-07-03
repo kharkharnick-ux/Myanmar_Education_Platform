@@ -18,12 +18,12 @@ export const Route = createFileRoute("/schools")({
 
 function SchoolsPage() {
   return (
-    <div className="min-h-screen">
+    <div className="aqua-page">
       <SiteHeader />
       <main className="py-20">
         <div className="container">
           <div className="mb-10 text-center">
-            <h1 className="text-4xl font-bold glow-text mb-4">ကျောင်းများ</h1>
+            <h1 className="aqua-section-title mb-4 text-4xl">ကျောင်းများ</h1>
             <p className="text-muted-foreground max-w-2xl mx-auto">
               သင့်ကလေးအတွက် အသင့်တော်ဆုံး ပညာရေးဝန်ဆောင်မှုများ ပေးအပ်နေသည့် 
               ကျောင်းများကို အောက်ပါစာရင်းတွင် စစ်ထုတ်ရှာဖွေနိုင်ပါသည်။

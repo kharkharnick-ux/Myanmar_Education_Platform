@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { REGIONS, fetchSchools, type School } from "@/lib/site-data";
+import { School as SchoolIcon } from "lucide-react";
+import { REGIONS, fetchSchools, hasFreshApprovedSchoolsCache, type School } from "@/lib/site-data";
 
-export function SchoolDiscovery() {
+export function SchoolDiscovery({ limit }: { limit?: number }) {
   const [active, setActive] = useState<string>(REGIONS[0]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -9,22 +10,25 @@ export function SchoolDiscovery() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const showSkeleton = !hasFreshApprovedSchoolsCache();
+    if (showSkeleton) setLoading(true);
     setError(null);
+
     fetchSchools(active)
       .then((rows) => {
-        if (!cancelled) setSchools(rows.slice(0, 4));
+        if (!cancelled) setSchools(typeof limit === "number" ? rows.slice(0, limit) : rows);
       })
-      .catch((e) => {
-        if (!cancelled) setError(e?.message ?? "Error");
+      .catch((error) => {
+        if (!cancelled) setError(error?.message ?? "Error");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, [active]);
+  }, [active, limit]);
 
   return (
     <section id="schools" className="mx-auto mt-24 max-w-7xl px-4 sm:px-6">
@@ -35,50 +39,51 @@ export function SchoolDiscovery() {
       </div>
 
       <div className="no-scrollbar -mx-2 flex gap-2 overflow-x-auto px-2 pb-2">
-        {REGIONS.map((r) => {
-          const isActive = active === r;
+        {REGIONS.map((region) => {
+          const isActive = active === region;
           return (
             <button
-              key={r}
-              onClick={() => setActive(r)}
+              key={region}
+              type="button"
+              onClick={() => setActive(region)}
               className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition ${
                 isActive
                   ? "bg-primary text-primary-foreground shadow-[var(--shadow-glow)]"
                   : "glass-panel text-foreground/80 hover:bg-accent/40"
               }`}
             >
-              {r}
+              {region}
             </button>
           );
         })}
       </div>
 
       <div className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4">
-        {loading && Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
+        {loading && Array.from({ length: limit || 4 }).map((_, index) => <SkeletonCard key={index} />)}
+
         {!loading && error && (
-          <div className="col-span-full glass p-8 text-center text-sm text-destructive">
+          <div className="col-span-full aqua-card p-8 text-center text-sm text-destructive">
             {error}
           </div>
         )}
+
         {!loading && !error && schools.length === 0 && (
-          <div className="col-span-full glass p-12 text-center">
+          <div className="col-span-full aqua-card p-12 text-center">
             <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full glass-panel">
-              🏫
+              <SchoolIcon className="h-6 w-6 text-primary" />
             </div>
             <p className="text-base font-semibold text-foreground">ကျောင်းများ မရှိသေးပါ</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              အသစ်ထည့်ပြီးပါက ဤနေရာတွင် ဖော်ပြပါမည်။
+              အတည်ပြုပြီးသော ကျောင်းများ ရှိလာပါက ဤနေရာတွင် ပြသပါမည်။
             </p>
           </div>
         )}
-        {!loading && !error && schools.map((s) => <SchoolCard key={s.id} school={s} />)}
+
+        {!loading && !error && schools.map((school) => <SchoolCard key={school.id} school={school} />)}
       </div>
 
       <div className="mt-10 flex justify-center">
-        <a
-          href="/schools"
-          className="rounded-xl glass-strong px-6 py-3 text-sm font-semibold text-foreground transition hover:opacity-90"
-        >
+        <a href="/schools" className="aqua-button rounded-xl px-6 py-3 text-sm font-semibold transition hover:brightness-105">
           ကျောင်းများအားလုံးကြည့်ရန်
         </a>
       </div>
@@ -88,10 +93,10 @@ export function SchoolDiscovery() {
 
 function SkeletonCard() {
   return (
-    <div className="glass overflow-hidden">
+    <div className="aqua-card overflow-hidden">
       <div className="h-32 animate-pulse bg-accent/40" />
       <div className="space-y-3 p-4">
-        <div className="h-10 w-10 -mt-9 rounded-xl bg-muted/70" />
+        <div className="-mt-9 h-10 w-10 rounded-xl bg-primary/15 shadow-[var(--shadow-glow)]" />
         <div className="h-4 w-3/4 animate-pulse rounded bg-accent/60" />
         <div className="h-3 w-1/2 animate-pulse rounded bg-accent/40" />
         <div className="h-8 w-full animate-pulse rounded bg-accent/40" />
@@ -102,7 +107,7 @@ function SkeletonCard() {
 
 function SchoolCard({ school }: { school: School }) {
   return (
-    <article className="glass group overflow-hidden transition hover:shadow-[var(--shadow-glow)]">
+    <article className="aqua-card group overflow-hidden transition hover:shadow-[var(--shadow-glow)]">
       <div
         className="h-32 w-full"
         style={{
@@ -112,25 +117,32 @@ function SchoolCard({ school }: { school: School }) {
         }}
       />
       <div className="p-4">
-        <div className="-mt-10 mb-3 grid h-12 w-12 place-items-center rounded-xl glass-strong text-base">
+        <div className="-mt-10 mb-3 grid h-12 w-12 place-items-center rounded-xl glass-strong gloss-highlight text-base">
           {school.logoUrl ? (
             <img src={school.logoUrl} alt="" className="h-10 w-10 rounded-lg object-cover" />
           ) : (
-            "🏫"
+            <SchoolIcon className="h-6 w-6 text-primary" />
           )}
         </div>
+
         <h3 className="line-clamp-1 text-base font-semibold text-foreground">{school.name}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">📍 {school.region}</p>
-        <div className="mt-3 flex items-center gap-3 text-xs text-foreground/80">
-          <span className="inline-flex items-center gap-1">⭐ {school.rating.toFixed(1)}</span>
-          <span className="inline-flex items-center gap-1">📊 {school.passRate}%</span>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {school.schoolType} • {school.gradeFrom} to {school.gradeTo}
+        </p>
+        <p className="mt-2 line-clamp-1 text-xs text-muted-foreground">
+          {school.region || "-"} {school.township ? ` / ${school.township}` : ""}
+        </p>
+        {school.address && <p className="mt-2 line-clamp-2 text-xs text-foreground/75">{school.address}</p>}
+
+        <div className="mt-3 space-y-1 text-xs text-foreground/80">
+          {school.phone && <p>{school.phone}</p>}
+          {school.email && <p className="truncate">{school.email}</p>}
+          {school.website && <p className="truncate">{school.website}</p>}
         </div>
-        <a
-          href={`/schools/${school.id}`}
-          className="mt-4 inline-flex w-full items-center justify-center rounded-lg glass-panel px-3 py-2 text-xs font-semibold text-foreground transition group-hover:bg-primary group-hover:text-primary-foreground"
-        >
+
+        <div className="hidden">
           အသေးစိတ်ကြည့်ရန်
-        </a>
+        </div>
       </div>
     </article>
   );

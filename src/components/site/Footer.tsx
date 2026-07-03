@@ -3,7 +3,7 @@ import { Logo } from "./Logo";
 export function SiteFooter() {
   return (
     <footer className="mx-auto mt-24 max-w-7xl px-4 pb-10 sm:px-6">
-      <div className="glass grid gap-10 p-8 md:grid-cols-3">
+      <div className="aqua-card grid gap-10 p-8 md:grid-cols-3">
         <div>
           <div className="flex items-center gap-3">
             <Logo />

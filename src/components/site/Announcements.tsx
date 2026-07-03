@@ -27,17 +27,17 @@ export function Announcements() {
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
         {loading && Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} />)}
         {!loading && error && (
-          <div className="col-span-full glass p-8 text-center text-sm text-destructive">{error}</div>
+          <div className="col-span-full aqua-card p-8 text-center text-sm text-destructive">{error}</div>
         )}
         {!loading && !error && items.length === 0 && (
-          <div className="col-span-full glass p-12 text-center">
+          <div className="col-span-full aqua-card p-12 text-center">
             <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full glass-panel">📣</div>
             <p className="text-base font-semibold text-foreground">ကြေညာချက်များ မရှိသေးပါ</p>
             <p className="mt-1 text-sm text-muted-foreground">အသစ်ထွက်ပါက ဤနေရာတွင် ဖော်ပြပါမည်။</p>
           </div>
         )}
         {!loading && !error && items.map((a) => (
-          <article key={a.id} className="glass overflow-hidden transition hover:shadow-[var(--shadow-glow)]">
+          <article key={a.id} className="aqua-card overflow-hidden transition hover:shadow-[var(--shadow-glow)]">
             <div
               className="h-40 w-full"
               style={{
@@ -66,7 +66,7 @@ export function Announcements() {
 
 function Skeleton() {
   return (
-    <div className="glass overflow-hidden">
+    <div className="aqua-card overflow-hidden">
       <div className="h-40 animate-pulse bg-accent/40" />
       <div className="space-y-3 p-5">
         <div className="h-3 w-24 animate-pulse rounded bg-accent/50" />

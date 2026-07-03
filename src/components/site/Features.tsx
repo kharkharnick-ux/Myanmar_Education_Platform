@@ -15,9 +15,9 @@ export function Features() {
         {FEATURES.map((f) => (
           <div
             key={f.title}
-            className="glass group p-6 transition hover:-translate-y-1 hover:shadow-[var(--shadow-glow)]"
+            className="aqua-card group p-6 transition hover:-translate-y-1 hover:shadow-[var(--shadow-glow)]"
           >
-            <div className="grid h-12 w-12 place-items-center rounded-xl glass-strong text-2xl">
+            <div className="gloss-highlight grid h-12 w-12 place-items-center rounded-xl glass-strong text-2xl">
               {f.icon}
             </div>
             <h3 className="mt-4 text-base font-semibold text-foreground">{f.title}</h3>

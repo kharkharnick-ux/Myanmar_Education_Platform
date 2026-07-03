@@ -13,6 +13,7 @@ import { ProfileDrawer } from "./ProfileDrawer";
 
 const NAV = [
   { to: "/super-admin", icon: LayoutDashboard, label: "ပင်မစာမျက်နှာ" },
+  { to: "/super-admin/school-admin-applications", icon: FileText, label: "School Admin Applications" },
   { to: "/super-admin/applications", icon: FileText, label: "ကျောင်းလျှောက်လွှာများ" },
   { to: "/super-admin/schools", icon: School, label: "ကျောင်းများ" },
   { to: "/super-admin/school-admins", icon: UserCog, label: "ကျောင်း Admin များ" },
@@ -30,7 +31,7 @@ export function Sidebar() {
   const navigate = useNavigate();
   const [profileOpen, setProfileOpen] = useState(false);
 
-  const { data: profile } = useQuery({
+  const { data: profile, refetch: refetchProfile } = useQuery({
     queryKey: ["user-profile"],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -58,12 +59,12 @@ export function Sidebar() {
   return (
     <aside className="hidden lg:flex sticky top-0 h-screen w-72 shrink-0 flex-col gap-4 p-4">
       {/* Profile Section at the Top */}
-      <div className="glass-strong p-3">
+      <div className="aqua-card p-3">
         <button 
           onClick={() => setProfileOpen(true)}
-          className="w-full flex items-center gap-3 rounded-xl p-2 hover:bg-white/5 transition-colors text-left"
+          className="w-full flex items-center gap-3 rounded-xl p-2 hover:bg-accent/35 transition-colors text-left"
         >
-          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[oklch(0.75_0.20_225)] to-[oklch(0.55_0.25_260)] text-xs font-bold text-white overflow-hidden shadow-inner">
+          <div className="theme-icon-tile-strong h-10 w-10 shrink-0 rounded-full text-xs font-bold overflow-hidden shadow-inner">
             {profile?.avatar_url ? (
               <img src={profile.avatar_url} alt="" className="h-full w-full object-cover" />
             ) : (
@@ -80,10 +81,18 @@ export function Sidebar() {
       <ProfileDrawer 
         open={profileOpen} 
         onOpenChange={setProfileOpen} 
-        user={{ ...userProfile, avatar_url: profile?.avatar_url, full_name: profile?.full_name || "System Owner", email: profile?.email || "admin@myanmar-edu" }} 
+        onProfileUpdated={() => refetchProfile()}
+        user={{
+          full_name: profile?.full_name || "System Owner",
+          email: profile?.email || "admin@myanmar-edu",
+          role: profile?.role || "super_admin",
+          phone: profile?.phone,
+          avatar_url: profile?.avatar_url,
+          created_at: profile?.created_at,
+        }} 
       />
 
-      <nav className="glass flex-1 overflow-y-auto p-3">
+      <nav className="aqua-panel flex-1 overflow-y-auto p-3">
         <ul className="space-y-1">
           {NAV.map((item) => {
             const active =
@@ -98,12 +107,12 @@ export function Sidebar() {
                   className={cn(
                     "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all duration-300",
                     active
-                      ? "bg-gradient-to-r from-[oklch(0.70_0.20_225/0.25)] to-[oklch(0.55_0.25_260/0.15)] text-foreground glow-ring"
-                      : "text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                      ? "theme-active-surface"
+                      : "text-muted-foreground hover:bg-accent/35 hover:text-foreground",
                   )}
                 >
                   <Icon className={cn("h-4 w-4 shrink-0 transition-transform group-hover:scale-110",
-                    active && "text-[var(--neon)]")} />
+                    active && "text-primary")} />
                   <span className="truncate">{item.label}</span>
                 </Link>
               </li>
@@ -113,10 +122,10 @@ export function Sidebar() {
       </nav>
 
       {/* Branding & Controls at the Bottom */}
-      <div className="glass-strong p-3 space-y-3">
+      <div className="aqua-card p-3 space-y-3">
         <div className="flex items-center gap-3 px-1 py-1">
-          <div className="relative grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[oklch(0.75_0.22_225)] to-[oklch(0.55_0.25_260)] glow-ring">
-            <Sparkles className="h-5 w-5 text-white" />
+          <div className="theme-icon-tile-strong relative h-10 w-10 rounded-xl">
+            <Sparkles className="h-5 w-5" />
           </div>
           <div className="min-w-0">
             <div className="truncate text-sm font-bold glow-text">Myanmar EDU</div>
@@ -127,7 +136,7 @@ export function Sidebar() {
         <div className="flex gap-2">
           <button
             onClick={toggle}
-            className="glass flex-1 flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs hover:glow-ring transition-all"
+            className="glass-panel flex-1 flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs hover:glow-ring transition-all"
             aria-label="Toggle theme"
           >
             {mounted ? (theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />) : <div className="h-4 w-4" />}
@@ -135,7 +144,7 @@ export function Sidebar() {
           </button>
           <button
             onClick={handleLogout}
-            className="glass flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs hover:glow-ring transition-all text-destructive"
+            className="glass-panel flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs hover:glow-ring transition-all text-destructive"
           >
             <LogOut className="h-4 w-4" />
             <span>ထွက်ရန်</span>
@@ -145,11 +154,3 @@ export function Sidebar() {
     </aside>
   );
 }
-
-const userProfile = {
-  full_name: "System Owner",
-  email: "admin@myanmar-edu",
-  role: "Super Admin",
-  phone: "",
-  created_at: ""
-};

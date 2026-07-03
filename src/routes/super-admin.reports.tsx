@@ -25,8 +25,8 @@ function ReportsPage() {
           const Icon = r.icon;
           return (
             <GlassCard key={r.title} className="group cursor-pointer">
-              <div className="grid h-12 w-12 place-items-center rounded-xl bg-gradient-to-br from-[oklch(0.75_0.22_225)] to-[oklch(0.55_0.25_260)] glow-ring mb-4">
-                <Icon className="h-5 w-5 text-white" />
+              <div className="theme-icon-tile-strong h-12 w-12 rounded-xl mb-4">
+                <Icon className="h-5 w-5" />
               </div>
               <h3 className="font-semibold mb-1">{r.title}</h3>
               <p className="text-xs text-muted-foreground mb-4">{r.desc}</p>

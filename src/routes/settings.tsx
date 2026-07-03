@@ -31,8 +31,8 @@ function SettingsPage() {
       {tab === "general" && (
         <GlassCard>
           <div className="flex items-center gap-3 mb-4">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[oklch(0.75_0.22_225)] to-[oklch(0.55_0.25_260)]">
-              <SettingsIcon className="h-5 w-5 text-white" />
+            <div className="theme-icon-tile-strong h-10 w-10 rounded-xl">
+              <SettingsIcon className="h-5 w-5" />
             </div>
             <div>
               <h3 className="font-semibold">General Settings</h3>

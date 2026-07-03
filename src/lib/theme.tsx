@@ -51,13 +51,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } catch {}
   }, [theme]);
 
+  const toggleTheme = () => {
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.add("no-theme-transition");
+    }
+
+    setTheme((t) => (t === "dark" ? "light" : "dark"));
+
+    if (typeof window !== "undefined" && typeof document !== "undefined") {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          document.documentElement.classList.remove("no-theme-transition");
+        });
+      });
+    }
+  };
+
   return (
     <ThemeCtx.Provider
       value={{
         theme,
         mounted,
-        toggle: () =>
-          setTheme((t) => (t === "dark" ? "light" : "dark")),
+        toggle: toggleTheme,
       }}
     >
       {children}
