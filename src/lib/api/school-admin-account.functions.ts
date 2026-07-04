@@ -50,6 +50,11 @@ const activateInputSchema = z.object({
   accessToken: z.string().min(1),
 });
 
+const passwordSetupLinkRequestSchema = z.object({
+  email: z.string().email(),
+  nrcLast6: z.string().regex(/^[0-9]{6}$/),
+});
+
 type RegistrationRequestRow = {
   id: string;
   status: "pending" | "approved" | "rejected";
@@ -80,6 +85,8 @@ type RegistrationRequestRow = {
   school_phone: string | null;
   school_email: string | null;
   reviewed_by?: string | null;
+  approved_profile_id?: string | null;
+  approved_school_id?: string | null;
 };
 
 type AuthUserRecord = {
@@ -91,7 +98,11 @@ const gradeOrder = ["KG", ...Array.from({ length: 12 }, (_, index) => `G-${index
 
 const gradeIndex = (grade: string) => gradeOrder.indexOf(grade);
 
-const validateGradeRangeForLevel = (level: "primary" | "middle" | "high", gradeFrom: string, gradeTo: string) => {
+const validateGradeRangeForLevel = (
+  level: "primary" | "middle" | "high",
+  gradeFrom: string,
+  gradeTo: string,
+) => {
   const fromIndex = gradeIndex(gradeFrom);
   const toIndex = gradeIndex(gradeTo);
   const primaryMaxGradeIndex = gradeIndex("G-5");
@@ -101,19 +112,34 @@ const validateGradeRangeForLevel = (level: "primary" | "middle" | "high", gradeF
   const highMaxGradeIndex = gradeIndex("G-12");
 
   if (fromIndex < 0 || toIndex < 0 || toIndex < fromIndex) return false;
-  if (level === "primary") return fromIndex <= primaryMaxGradeIndex && toIndex <= primaryMaxGradeIndex;
-  if (level === "middle") return fromIndex <= middleMaxGradeIndex && toIndex >= middleMinGradeIndex && toIndex <= middleMaxGradeIndex;
+  if (level === "primary")
+    return fromIndex <= primaryMaxGradeIndex && toIndex <= primaryMaxGradeIndex;
+  if (level === "middle")
+    return (
+      fromIndex <= middleMaxGradeIndex &&
+      toIndex >= middleMinGradeIndex &&
+      toIndex <= middleMaxGradeIndex
+    );
   return toIndex >= highMinGradeIndex && toIndex <= highMaxGradeIndex;
 };
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
+const myanmarDigits = "၀၁၂၃၄၅၆၇၈၉";
+
+const toEnglishDigits = (value = "") =>
+  value.replace(/[၀-၉]/g, (digit) => myanmarDigits.indexOf(digit).toString());
+
+const extractLast6Digits = (value = "") =>
+  toEnglishDigits(value)
+    .replace(/[^0-9]/g, "")
+    .slice(-6);
+
 const PASSWORD_SETUP_EMAIL_CONFIG_ERROR =
   "Password setup email မပို့နိုင်သေးပါ။\nServer configuration ကိုစစ်ဆေးရန်လိုအပ်ပါသည်။";
 
 const isMissingSupabaseServerEnvError = (error: unknown) =>
-  error instanceof Error &&
-  error.message.includes("Missing Supabase server environment variable");
+  error instanceof Error && error.message.includes("Missing Supabase server environment variable");
 
 const findAuthUserByEmail = async (
   supabaseAdmin: Awaited<typeof import("@/integrations/supabase/client.server")>["supabaseAdmin"],
@@ -141,7 +167,7 @@ const findAuthUserByEmail = async (
 const getOrInviteSchoolAdminUser = async (
   supabaseAdmin: Awaited<typeof import("@/integrations/supabase/client.server")>["supabaseAdmin"],
   request: RegistrationRequestRow,
-  reviewerId: string,
+  reviewerId: string | null,
 ): Promise<AuthUserRecord> => {
   console.info("[School admin approval debug] getOrInviteSchoolAdminUser reached", {
     requestId: request.id,
@@ -178,31 +204,37 @@ const getOrInviteSchoolAdminUser = async (
     redirectToExists: Boolean(redirectTo),
   });
 
-  const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(normalizeEmail(request.email), {
-    redirectTo,
-    data: {
-      full_name: request.full_name_mm,
-      full_name_en: request.full_name_en,
-      role: "school_admin",
-      registration_request_id: request.id,
-      approved_by_super_admin_id: reviewerId,
+  const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(
+    normalizeEmail(request.email),
+    {
+      redirectTo,
+      data: {
+        full_name: request.full_name_mm,
+        full_name_en: request.full_name_en,
+        role: "school_admin",
+        registration_request_id: request.id,
+        approved_by_super_admin_id: reviewerId,
+      },
     },
-  });
+  );
 
   if (error) {
     console.error("[School admin approval debug] inviteUserByEmail Supabase error", error);
     if (/already|registered|exists/i.test(error.message)) {
       const userAfterRetry = await findAuthUserByEmail(supabaseAdmin, request.email);
       if (userAfterRetry) {
-        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(userAfterRetry.id, {
-          user_metadata: {
-            full_name: request.full_name_mm,
-            full_name_en: request.full_name_en,
-            role: "school_admin",
-            registration_request_id: request.id,
-            approved_by_super_admin_id: reviewerId,
+        const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
+          userAfterRetry.id,
+          {
+            user_metadata: {
+              full_name: request.full_name_mm,
+              full_name_en: request.full_name_en,
+              role: "school_admin",
+              registration_request_id: request.id,
+              approved_by_super_admin_id: reviewerId,
+            },
           },
-        });
+        );
         if (updateError) throw updateError;
 
         const { error: recoveryError } = await supabaseAdmin.auth.resetPasswordForEmail(
@@ -333,7 +365,7 @@ const provisionApprovedSchoolAdmin = async (
     })
     .eq("id", request.id)
     .eq("request_type", "school_admin")
-    .eq("status", "pending");
+    .in("status", ["pending", "approved"]);
 
   if (reviewError) throw reviewError;
 
@@ -480,16 +512,78 @@ export const reviewSchoolAdminApplication = createServerFn({ method: "POST" })
     } catch (error) {
       console.error("School admin password setup email failed:", error);
       throw new Error(PASSWORD_SETUP_EMAIL_CONFIG_ERROR);
-      throw new Error(
-        "Password setup email မပို့နိုင်သေးပါ။ Server configuration ကိုစစ်ဆေးရန်လိုအပ်ပါသည်။",
-      );
     }
+
+    const { error: approveError } = await supabaseAdmin
+      .from("registration_requests")
+      .update({
+        status: "approved",
+        reviewed_at: now,
+        reviewed_by: user.id,
+        rejection_reason: null,
+      })
+      .eq("id", registrationRequest.id)
+      .eq("request_type", "school_admin")
+      .eq("status", "pending");
+
+    if (approveError) throw approveError;
 
     return {
       ok: true,
       inviteSent: true,
       email: normalizeEmail(registrationRequest.email),
       message: `School Admin email (${normalizeEmail(registrationRequest.email)}) သို့ password သတ်မှတ်ရန် link ပေးပို့ထားပါသည်။ User မှ password သတ်မှတ်ပြီးပါက account ကို အလိုအလျောက် အတည်ပြုပေးပါမည်။`,
+    };
+  });
+
+export const requestSchoolAdminPasswordSetupLink = createServerFn({ method: "POST" })
+  .validator(passwordSetupLinkRequestSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const normalizedEmail = normalizeEmail(data.email);
+
+    const { data: requests, error: requestError } = await supabaseAdmin
+      .from("registration_requests")
+      .select("*")
+      .eq("request_type", "school_admin")
+      .eq("status", "approved")
+      .eq("email", normalizedEmail)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (requestError) throw requestError;
+
+    const registrationRequest = ((requests || []) as RegistrationRequestRow[]).find(
+      (request) => extractLast6Digits(request.nrc_number) === data.nrcLast6,
+    );
+
+    if (!registrationRequest) {
+      throw new Error(
+        "Approved School Admin application မတွေ့ပါ။ Email နှင့် NRC နောက်ဆုံးဂဏန်း ၆ လုံးကို ပြန်စစ်ပါ။",
+      );
+    }
+
+    if (registrationRequest.approved_profile_id && registrationRequest.approved_school_id) {
+      throw new Error("Password သတ်မှတ်ပြီးသား account ဖြစ်ပါသည်။ Login page မှဝင်ရောက်ပါ။");
+    }
+
+    requireSchoolRegistrationFields(registrationRequest);
+
+    try {
+      await getOrInviteSchoolAdminUser(
+        supabaseAdmin,
+        registrationRequest,
+        registrationRequest.reviewed_by || null,
+      );
+    } catch (error) {
+      console.error("School admin password setup resend failed:", error);
+      throw new Error(PASSWORD_SETUP_EMAIL_CONFIG_ERROR);
+    }
+
+    return {
+      ok: true,
+      email: normalizedEmail,
+      message: "Password setup link အသစ်ကို သင့် email သို့ ပေးပို့ထားပါသည်။",
     };
   });
 
@@ -519,7 +613,7 @@ export const activateApprovedSchoolAdminRegistration = createServerFn({ method: 
       .from("registration_requests")
       .select("*")
       .eq("request_type", "school_admin")
-      .eq("status", "pending")
+      .in("status", ["pending", "approved"])
       .eq("email", normalizeEmail(user.email));
 
     if (registrationRequestId) {
@@ -532,9 +626,18 @@ export const activateApprovedSchoolAdminRegistration = createServerFn({ method: 
       .maybeSingle();
 
     if (requestError) throw requestError;
-    if (!request) throw new Error("Pending registration request not found for this email.");
+    if (!request) throw new Error("Approved registration request not found for this email.");
 
     const registrationRequest = request as RegistrationRequestRow;
+    if (registrationRequest.approved_profile_id && registrationRequest.approved_school_id) {
+      return {
+        ok: true,
+        activated: true,
+        profileId: registrationRequest.approved_profile_id,
+        schoolId: registrationRequest.approved_school_id,
+      };
+    }
+
     const reviewerId = reviewerIdFromInvite || registrationRequest.reviewed_by || null;
 
     const result = await provisionApprovedSchoolAdmin(
