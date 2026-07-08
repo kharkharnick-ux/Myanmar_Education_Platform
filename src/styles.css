@@ -797,3 +797,82 @@ select option {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+@property --school-led-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.school-led-frame {
+  --school-led-angle: 0deg;
+  isolation: isolate;
+}
+
+.school-led-frame::before,
+.school-led-frame::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2.5px;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.school-led-frame::before {
+  z-index: 2;
+  background: linear-gradient(
+    135deg,
+    rgb(3 7 18 / 0.68),
+    rgb(15 23 42 / 0.50) 44%,
+    rgb(2 6 23 / 0.76)
+  );
+}
+
+.school-led-frame::after {
+  z-index: 3;
+  background: conic-gradient(
+    from var(--school-led-angle),
+    transparent 0deg,
+    transparent 278deg,
+    rgb(34 211 238 / 0.10) 294deg,
+    rgb(34 211 238 / 0.95) 310deg,
+    rgb(37 99 235 / 1) 322deg,
+    rgb(139 92 246 / 1) 335deg,
+    rgb(236 72 153 / 0.95) 348deg,
+    rgb(255 255 255 / 0.98) 356deg,
+    transparent 360deg
+  );
+  filter:
+    drop-shadow(0 0 5px rgb(34 211 238 / 0.92))
+    drop-shadow(0 0 12px rgb(37 99 235 / 0.58))
+    drop-shadow(0 0 18px rgb(236 72 153 / 0.38));
+  animation: school-led-border-spin 3.6s linear infinite;
+}
+
+.dark .school-led-frame::before {
+  background: linear-gradient(
+    135deg,
+    rgb(2 6 23 / 0.94),
+    rgb(15 23 42 / 0.72) 44%,
+    rgb(2 6 23 / 0.96)
+  );
+}
+
+.dark .school-led-frame::after {
+  filter:
+    drop-shadow(0 0 6px rgb(34 211 238 / 1))
+    drop-shadow(0 0 15px rgb(37 99 235 / 0.68))
+    drop-shadow(0 0 22px rgb(236 72 153 / 0.46));
+}
+
+@keyframes school-led-border-spin {
+  to {
+    --school-led-angle: 360deg;
+  }
+}

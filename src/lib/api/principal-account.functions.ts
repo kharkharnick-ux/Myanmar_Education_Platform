@@ -1,0 +1,1102 @@
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+
+const invitePrincipalSchema = z.object({
+  accessToken: z.string().min(1).optional(),
+  email: z.string().email(),
+  note: z.string().optional(),
+});
+
+const tokenSchema = z.object({
+  token: z.string().min(16),
+});
+
+const submitPrincipalRegistrationSchema = z.object({
+  token: z.string().min(16),
+  fullNameMm: z.string().min(1),
+  fullNameEn: z.string().min(1),
+  phone: z.string().min(1),
+  dateOfBirth: z.string().min(1),
+  gender: z.string().min(1),
+  nrcNumber: z.string().min(1),
+  residentialAddress: z.string().min(1),
+  stateRegionId: z.number().int().nullable(),
+  townshipId: z.number().int().nullable(),
+  profilePhotoUrl: z.string().nullable(),
+  highestEducation: z.string().min(1),
+  major: z.string().min(1),
+  yearsOfTeachingExperience: z.number().int().min(0),
+  yearsOfManagementExperience: z.number().int().min(0),
+  previousSchool: z.string().nullable(),
+  currentPosition: z.string().min(1),
+  nrcFrontUrl: z.string().min(1),
+  nrcBackUrl: z.string().min(1),
+  degreeCertificateUrl: z.string().nullable(),
+  teachingLicenseUrl: z.string().nullable(),
+  appointmentLetterUrl: z.string().nullable(),
+  resumeUrl: z.string().nullable(),
+  recommendationLetterUrl: z.string().nullable(),
+  emergencyContactName: z.string().min(1),
+  emergencyContactRelationship: z.string().min(1),
+  emergencyContactPhone: z.string().min(1),
+  declarationAccepted: z.literal(true),
+});
+
+const registerSelfPrincipalSchema = z.object({
+  accessToken: z.string().min(1).optional(),
+});
+
+const reviewPrincipalSchema = z.object({
+  accessToken: z.string().min(1).optional(),
+  requestId: z.string().uuid(),
+  status: z.enum(["approved", "rejected"]),
+  rejectionReason: z.string().optional(),
+});
+
+type SupabaseAdmin = Awaited<
+  typeof import("@/integrations/supabase/client.server")
+>["supabaseAdmin"];
+
+type SchoolRow = {
+  id: string;
+  school_name: string;
+  school_type: string | null;
+  school_level?: string | null;
+  grade_from: string | null;
+  grade_to: string | null;
+  address: string | null;
+  school_phone: string | null;
+  school_email: string | null;
+  logo_url: string | null;
+  region_id?: number | null;
+  township_id?: number | null;
+  regions?: { name: string | null } | null;
+  townships?: { name: string | null } | null;
+};
+
+type PrincipalRequestRow = {
+  id: string;
+  request_type: string;
+  status: "invited" | "pending" | "approved" | "rejected";
+  email: string;
+  phone: string | null;
+  full_name_mm: string | null;
+  full_name_en: string | null;
+  date_of_birth: string | null;
+  gender: string | null;
+  nrc_number: string | null;
+  residential_address: string | null;
+  state_region_id: number | null;
+  township_id: number | null;
+  nrc_front_url: string | null;
+  nrc_back_url: string | null;
+  invite_token: string | null;
+  invite_token_expires_at: string | null;
+  invited_by: string | null;
+  approved_school_id: string | null;
+  approved_profile_id: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  rejection_reason: string | null;
+  invite_note?: string | null;
+  highest_education?: string | null;
+  major?: string | null;
+  years_of_teaching_experience?: number | null;
+  years_of_management_experience?: number | null;
+  previous_school?: string | null;
+  current_position?: string | null;
+  profile_photo_url?: string | null;
+  degree_certificate_url?: string | null;
+  teaching_license_url?: string | null;
+  appointment_letter_url?: string | null;
+  resume_url?: string | null;
+  recommendation_letter_url?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_relationship?: string | null;
+  emergency_contact_phone?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
+const getRedactedKeyPrefix = (value?: string | null) => {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("sb_publishable_")) return "sb_publishable_...";
+  if (trimmed.startsWith("sb_secret_")) return "sb_secret_...";
+  if (trimmed.startsWith("eyJ")) return "eyJ...";
+  return `${trimmed.slice(0, 4)}...`;
+};
+
+const logSupabasePrincipalAuthEnv = () => {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const vitePublishableKey = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY || vitePublishableKey;
+
+  console.info("[Principal auth config] Supabase env", {
+    hasSupabaseUrl: Boolean(supabaseUrl),
+    hasSupabaseServiceRoleKey: Boolean(serviceRoleKey),
+    supabaseServiceRoleKeyPrefix: getRedactedKeyPrefix(serviceRoleKey),
+    hasViteSupabasePublishableKey: Boolean(vitePublishableKey),
+    viteSupabasePublishableKeyPrefix: getRedactedKeyPrefix(vitePublishableKey),
+    hasSupabasePublishableKeyFallback: Boolean(process.env.SUPABASE_PUBLISHABLE_KEY),
+    supabasePublishableKeyPrefix: getRedactedKeyPrefix(publishableKey),
+  });
+};
+
+const getSupabasePublicConfig = () => {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const publishableKey =
+    process.env.SUPABASE_PUBLISHABLE_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
+
+  if (!url || !publishableKey) {
+    logSupabasePrincipalAuthEnv();
+    throw new Error("Supabase authentication is not configured.");
+  }
+
+  return { url, publishableKey };
+};
+
+const getBearerTokenFromRequest = async () => {
+  const { getRequest } = await import("@tanstack/react-start/server");
+  const request = getRequest();
+  const authHeader = request?.headers?.get("authorization") || "";
+
+  if (!authHeader) return "";
+  if (!authHeader.startsWith("Bearer ")) return "";
+  return authHeader.slice("Bearer ".length).trim();
+};
+
+const getCurrentUserAccessToken = async (fallbackAccessToken?: string) => {
+  const requestToken = await getBearerTokenFromRequest();
+  return requestToken || fallbackAccessToken?.trim() || "";
+};
+
+const getVerifiedUserFromRequest = async (fallbackAccessToken?: string) => {
+  logSupabasePrincipalAuthEnv();
+
+  const accessToken = await getCurrentUserAccessToken(fallbackAccessToken);
+  if (!accessToken) throw new Error("Please sign in again to continue.");
+
+  const { createClient } = await import("@supabase/supabase-js");
+  const { url, publishableKey } = getSupabasePublicConfig();
+  const authClient = createClient(url, publishableKey, {
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+    auth: {
+      storage: undefined,
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+  const {
+    data: { user },
+    error,
+  } = await authClient.auth.getUser(accessToken);
+
+  if (error) {
+    console.error("[Principal auth] User verification failed", {
+      message: error.message,
+      status: "status" in error ? error.status : undefined,
+      name: error.name,
+    });
+    throw new Error("Please sign in again to continue.");
+  }
+
+  if (!user?.id) throw new Error("Please sign in again to continue.");
+  return user;
+};
+
+const getAppOrigin = async () => {
+  const { getRequest } = await import("@tanstack/react-start/server");
+  const request = getRequest();
+  const fallbackOrigin = "http://localhost:8080";
+  const origin =
+    process.env.APP_ORIGIN ||
+    process.env.SITE_URL ||
+    process.env.VITE_APP_URL ||
+    (request ? new URL(request.url).origin : fallbackOrigin);
+
+  return origin.replace(/\/$/, "");
+};
+
+const getPasswordSetupRedirectUrl = async () => `${await getAppOrigin()}/auth/setup-password`;
+
+const getPrincipalInviteUrl = async (token: string) =>
+  `${await getAppOrigin()}/principal/register?token=${encodeURIComponent(token)}`;
+
+const createInviteToken = () =>
+  `${crypto.randomUUID()}-${crypto.randomUUID()}-${Date.now().toString(36)}`;
+
+type PrincipalInviteEmailJSConfig =
+  | {
+      mode: "emailjs";
+      serviceId: string;
+      templateId: string;
+      publicKey: string;
+      privateKey: string | null;
+    }
+  | {
+      mode: "manual";
+      missingKeys: string[];
+    };
+
+const EMAILJS_SEND_ENDPOINT = "https://api.emailjs.com/api/v1.0/email/send";
+const PRINCIPAL_INVITE_EMAIL_ERROR = "Unable to send the Principal invite email.";
+
+const isProductionRuntime = () => process.env.NODE_ENV === "production";
+
+const readServerEnv = (key: string) => process.env[key]?.trim() || "";
+
+const isUsableEmailJSPrivateKey = (value?: string | null) => {
+  const trimmed = value?.trim();
+  return Boolean(trimmed && trimmed !== "..........");
+};
+
+const getPrincipalInviteEmailJSConfig = (): PrincipalInviteEmailJSConfig => {
+  const serviceId = readServerEnv("EMAILJS_SERVICE_ID");
+  const templateId = readServerEnv("EMAILJS_TEMPLATE_ID");
+  const publicKey = readServerEnv("EMAILJS_PUBLIC_KEY");
+  const privateKeyValue = readServerEnv("EMAILJS_PRIVATE_KEY");
+  const privateKey = isUsableEmailJSPrivateKey(privateKeyValue) ? privateKeyValue : null;
+  const missingKeys = [
+    ["EMAILJS_SERVICE_ID", serviceId],
+    ["EMAILJS_TEMPLATE_ID", templateId],
+    ["EMAILJS_PUBLIC_KEY", publicKey],
+  ]
+    .filter(([, value]) => !value)
+    .map(([key]) => key);
+
+  if (missingKeys.length > 0) {
+    if (!isProductionRuntime()) {
+      console.warn("[Principal invite email] EmailJS config missing; using dev manual mode.", {
+        missingKeys,
+      });
+      return { mode: "manual", missingKeys };
+    }
+
+    console.error("[Principal invite email] EmailJS config missing in production.", {
+      missingKeys,
+    });
+    throw new Error(PRINCIPAL_INVITE_EMAIL_ERROR);
+  }
+
+  return {
+    mode: "emailjs",
+    serviceId,
+    templateId,
+    publicKey,
+    privateKey,
+  };
+};
+
+const buildPrincipalInviteMessage = (schoolName: string, note?: string | null) => {
+  const trimmedNote = note?.trim();
+  return trimmedNote || `Please complete your Principal registration for ${schoolName}.`;
+};
+
+const redactEmailJSLogText = ({
+  value,
+  config,
+  inviteUrl,
+}: {
+  value: string;
+  config: Extract<PrincipalInviteEmailJSConfig, { mode: "emailjs" }>;
+  inviteUrl: string;
+}) => {
+  let redacted = value;
+  const escapedInviteUrl = inviteUrl.replace(/\//g, "\\/");
+  const sensitiveValues = [
+    config.publicKey,
+    config.privateKey,
+    inviteUrl,
+    escapedInviteUrl,
+  ].filter((item): item is string => Boolean(item));
+
+  for (const sensitiveValue of sensitiveValues) {
+    redacted = redacted.split(sensitiveValue).join("[redacted]");
+  }
+
+  return redacted
+    .replace(/https?:\/\/[^\s"'<>]*\/principal\/register\?token=[^\s"'<>]+/g, "[redacted invite link]")
+    .replace(/https?:\\\/\\\/[^\s"'<>]*\\\/principal\\\/register\?token=[^\s"'<>]+/g, "[redacted invite link]")
+    .replace(/(token=)[^&\s"'<>]+/g, "$1[redacted]");
+};
+
+const parseEmailJSLogBody = ({
+  bodyText,
+  config,
+  inviteUrl,
+}: {
+  bodyText: string;
+  config: Extract<PrincipalInviteEmailJSConfig, { mode: "emailjs" }>;
+  inviteUrl: string;
+}) => {
+  const redactedText = redactEmailJSLogText({ value: bodyText, config, inviteUrl });
+
+  try {
+    return JSON.parse(redactedText) as unknown;
+  } catch {
+    return redactedText;
+  }
+};
+
+const sendPrincipalInviteEmailWithEmailJS = async ({
+  config,
+  principalEmail,
+  schoolName,
+  schoolAdminName,
+  schoolAdminEmail,
+  inviteUrl,
+  note,
+}: {
+  config: Extract<PrincipalInviteEmailJSConfig, { mode: "emailjs" }>;
+  principalEmail: string;
+  schoolName: string;
+  schoolAdminName: string;
+  schoolAdminEmail: string;
+  inviteUrl: string;
+  note?: string | null;
+}) => {
+  let response: Response;
+  const templateParams = {
+    to_email: principalEmail,
+    school_name: schoolName,
+    admin_name: schoolAdminName,
+    invite_link: inviteUrl,
+    message: buildPrincipalInviteMessage(schoolName, note),
+    reply_to: schoolAdminEmail,
+  };
+  const templateParamKeys = Object.keys(templateParams);
+  const logContext = {
+    serviceIdExists: Boolean(config.serviceId),
+    templateIdExists: Boolean(config.templateId),
+    publicKeyExists: Boolean(config.publicKey),
+    privateKeyExists: isUsableEmailJSPrivateKey(config.privateKey),
+    toEmail: principalEmail,
+    templateParamKeys,
+  };
+  const requestBody = {
+    service_id: config.serviceId,
+    template_id: config.templateId,
+    user_id: config.publicKey,
+    ...(isUsableEmailJSPrivateKey(config.privateKey) ? { accessToken: config.privateKey } : {}),
+    template_params: templateParams,
+  };
+
+  console.info("[Principal invite EmailJS] Sending invite email", logContext);
+
+  try {
+    response = await fetch(EMAILJS_SEND_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
+    });
+  } catch (error) {
+    console.error("[Principal invite EmailJS] Request failed", {
+      ...logContext,
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw new Error(PRINCIPAL_INVITE_EMAIL_ERROR);
+  }
+
+  if (!response.ok) {
+    const responseText = await response.text().catch(() => "");
+    const body = parseEmailJSLogBody({
+      bodyText: responseText,
+      config,
+      inviteUrl,
+    });
+
+    console.error("[Principal invite EmailJS] Send failed", {
+      status: response.status,
+      statusText: response.statusText,
+      body,
+      ...logContext,
+    });
+    throw new Error(PRINCIPAL_INVITE_EMAIL_ERROR);
+  }
+};
+
+const toPublicSchool = (school: SchoolRow | null) =>
+  school
+    ? {
+        id: school.id,
+        name: school.school_name,
+        type: school.school_type,
+        level: school.school_level || null,
+        gradeFrom: school.grade_from,
+        gradeTo: school.grade_to,
+        address: school.address,
+        phone: school.school_phone,
+        email: school.school_email,
+        logoUrl: school.logo_url,
+        region: school.regions?.name || null,
+        township: school.townships?.name || null,
+      }
+    : null;
+
+const getSchoolAdminContext = async (
+  supabaseAdmin: SupabaseAdmin,
+  fallbackAccessToken?: string,
+) => {
+  const user = await getVerifiedUserFromRequest(fallbackAccessToken);
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .select("id, role, status, email, full_name, phone")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profileError) {
+    console.error("[Principal auth] School Admin profile query failed", {
+      message: profileError.message,
+      code: profileError.code,
+    });
+    throw new Error("Unable to verify School Admin permission.");
+  }
+  if (!profile || profile.role !== "school_admin" || profile.status !== "active") {
+    throw new Error("Active School Admin permission required.");
+  }
+
+  const { data: school, error: schoolError } = await supabaseAdmin
+    .from("schools")
+    .select(
+      "id, school_name, school_type, school_level, grade_from, grade_to, address, school_phone, school_email, logo_url, region_id, township_id, regions(name), townships(name)",
+    )
+    .eq("school_admin_id", user.id)
+    .eq("status", "approved")
+    .maybeSingle();
+
+  if (schoolError) {
+    console.error("[Principal auth] Approved school query failed", {
+      message: schoolError.message,
+      code: schoolError.code,
+    });
+    throw new Error("Unable to verify School Admin school.");
+  }
+  if (!school) throw new Error("Approved school not found for this School Admin.");
+
+  return { user, profile, school: school as SchoolRow };
+};
+
+const fetchPrincipalRequestForSchool = async (
+  supabaseAdmin: SupabaseAdmin,
+  requestId: string,
+  schoolId: string,
+) => {
+  const { data, error } = await supabaseAdmin
+    .from("registration_requests")
+    .select("*")
+    .eq("id", requestId)
+    .eq("request_type", "principal")
+    .eq("approved_school_id", schoolId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("Principal request not found.");
+  return data as PrincipalRequestRow;
+};
+
+const fetchValidPrincipalInvite = async (supabaseAdmin: SupabaseAdmin, token: string) => {
+  const { data: request, error } = await supabaseAdmin
+    .from("registration_requests")
+    .select("*")
+    .eq("request_type", "principal")
+    .eq("invite_token", token)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!request) throw new Error("Principal invite link is invalid.");
+
+  const principalRequest = request as PrincipalRequestRow;
+  if (principalRequest.status !== "invited") {
+    throw new Error("Principal invite link has already been used or reviewed.");
+  }
+
+  if (
+    principalRequest.invite_token_expires_at &&
+    new Date(principalRequest.invite_token_expires_at).getTime() < Date.now()
+  ) {
+    throw new Error(
+      "Principal invite link has expired. Please ask the School Admin for a new invite.",
+    );
+  }
+
+  return principalRequest;
+};
+
+const findAuthUserByEmail = async (supabaseAdmin: SupabaseAdmin, email: string) => {
+  const normalizedEmail = normalizeEmail(email);
+
+  for (let page = 1; page <= 20; page += 1) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage: 1000,
+    });
+
+    if (error) throw error;
+    const users = data?.users || [];
+    const match = users.find((user) => normalizeEmail(user.email || "") === normalizedEmail);
+    if (match) return match;
+    if (users.length < 1000) return null;
+  }
+
+  return null;
+};
+
+const formatExistingAccountRole = (role?: string | null) => {
+  if (!role) return "ရှိပြီးသားတာဝန်";
+
+  const roleLabels: Record<string, string> = {
+    school_admin: "School Admin",
+    principal: "Principal",
+    teacher: "Teacher",
+    student: "Student",
+    super_admin: "Super Admin",
+  };
+
+  return roleLabels[role] || role
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const fetchSchoolNameById = async (supabaseAdmin: SupabaseAdmin, schoolId?: string | null) => {
+  if (!schoolId) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("schools")
+    .select("school_name")
+    .eq("id", schoolId)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.school_name || null;
+};
+
+const fetchSchoolNameByAdminId = async (supabaseAdmin: SupabaseAdmin, profileId: string) => {
+  const { data, error } = await supabaseAdmin
+    .from("schools")
+    .select("school_name")
+    .eq("school_admin_id", profileId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.school_name || null;
+};
+
+const getExistingPrincipalInviteWarning = async (
+  supabaseAdmin: SupabaseAdmin,
+  email: string,
+) => {
+  const existingUser = await findAuthUserByEmail(supabaseAdmin, email);
+  if (!existingUser) return null;
+
+  const metadata = existingUser.user_metadata as Record<string, unknown> | undefined;
+  const metadataRole = typeof metadata?.role === "string" ? metadata.role : null;
+  const metadataSchoolId =
+    typeof metadata?.approved_school_id === "string" ? metadata.approved_school_id : null;
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("profiles")
+    .select("id, role, email, full_name")
+    .eq("id", existingUser.id)
+    .maybeSingle();
+
+  if (profileError) throw profileError;
+
+  const { data: teacher, error: teacherError } = await supabaseAdmin
+    .from("teachers")
+    .select("id, school_id, profile_id, level")
+    .eq("profile_id", existingUser.id)
+    .limit(1)
+    .maybeSingle();
+
+  if (teacherError) throw teacherError;
+
+  const role = teacher?.level || profile?.role || metadataRole;
+  let schoolName = await fetchSchoolNameById(supabaseAdmin, teacher?.school_id);
+
+  if (!schoolName && profile?.role === "school_admin") {
+    schoolName = await fetchSchoolNameByAdminId(supabaseAdmin, existingUser.id);
+  }
+
+  if (!schoolName) {
+    schoolName = await fetchSchoolNameById(supabaseAdmin, metadataSchoolId);
+  }
+
+  return `ဤ email account သည် ${schoolName || "ရှိပြီးသားကျောင်းတစ်ခု"} တွင် ${formatExistingAccountRole(role)} အဖြစ် တာဝန်ထမ်းဆောင်နေပြီးသားဖြစ်ပါသည်။ Principal အဖြစ် ခန့်အပ်၍မရပါ။`;
+};
+
+const inviteOrResetPrincipalUser = async (
+  supabaseAdmin: SupabaseAdmin,
+  request: PrincipalRequestRow,
+  reviewerId: string,
+) => {
+  const redirectTo = await getPasswordSetupRedirectUrl();
+  const normalizedEmail = normalizeEmail(request.email);
+  const userMetadata = {
+    full_name: request.full_name_mm || request.full_name_en || normalizedEmail,
+    full_name_en: request.full_name_en,
+    role: "principal",
+    teacher_level: "principal",
+    registration_request_id: request.id,
+    approved_by_school_admin_id: reviewerId,
+    approved_school_id: request.approved_school_id,
+  };
+  const existingUserWarning = await getExistingPrincipalInviteWarning(supabaseAdmin, normalizedEmail);
+
+  if (existingUserWarning) {
+    throw new Error(existingUserWarning);
+  }
+
+  const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(normalizedEmail, {
+    redirectTo,
+    data: userMetadata,
+  });
+
+  if (error) throw error;
+  if (!data.user) throw new Error("Unable to create Principal auth invite.");
+  return data.user;
+};
+
+export const invitePrincipal = createServerFn({ method: "POST" })
+  .validator(invitePrincipalSchema)
+  .handler(async ({ data }) => {
+    console.info("[Principal invite debug] function reached");
+    console.info("[Principal invite debug] input", {
+      email: data.email,
+      note: data.note ?? null,
+    });
+
+    try {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { user, profile, school } = await getSchoolAdminContext(
+        supabaseAdmin,
+        data.accessToken,
+      );
+      const normalizedEmail = normalizeEmail(data.email);
+      const token = createInviteToken();
+      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
+
+      console.info("[Principal invite debug] current context", {
+        userId: user.id,
+        schoolId: school.id,
+        schoolRecordExists: Boolean(school),
+      });
+
+      const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, email")
+        .eq("email", normalizedEmail)
+        .limit(1)
+        .maybeSingle();
+
+      if (targetProfileError) {
+        console.error("[Principal invite debug] target profile query error", targetProfileError);
+      }
+
+      console.info("[Principal invite debug] target profile exists", {
+        targetProfileExists: Boolean(targetProfile),
+        targetProfileId: targetProfile?.id ?? null,
+        targetProfileRole: targetProfile?.role ?? null,
+      });
+
+      if (normalizeEmail(user.email || "") === normalizedEmail) {
+        throw new Error(
+          "This is the School Admin email. Choose 'School Admin is also Principal' instead.",
+        );
+      }
+
+      const existingUserWarning = await getExistingPrincipalInviteWarning(
+        supabaseAdmin,
+        normalizedEmail,
+      );
+      if (existingUserWarning) {
+        throw new Error(existingUserWarning);
+      }
+
+      const { data: existingActivePrincipal, error: activePrincipalError } = await supabaseAdmin
+        .from("teachers")
+        .select("id")
+        .eq("school_id", school.id)
+        .eq("level", "principal")
+        .limit(1)
+        .maybeSingle();
+
+      if (activePrincipalError) {
+        console.error("[Principal invite debug] active principal query error", activePrincipalError);
+        throw new Error(
+          activePrincipalError.message || "Unable to check the current Principal assignment.",
+        );
+      }
+      if (existingActivePrincipal) {
+        throw new Error("This school already has an active Principal.");
+      }
+
+      const emailConfig = getPrincipalInviteEmailJSConfig();
+
+      const insertPayload = {
+        request_type: "principal",
+        status: "invited",
+        email: normalizedEmail,
+        phone: "",
+        full_name_mm: "Invited Principal",
+        full_name_en: "Invited Principal",
+        date_of_birth: null,
+        gender: null,
+        nrc_number: "",
+        residential_address: "",
+        state_region_id: school.region_id || null,
+        township_id: school.township_id || null,
+        nrc_front_url: "",
+        nrc_back_url: "",
+        approved_school_id: school.id,
+        invited_by: user.id,
+        invite_token: token,
+        invite_token_expires_at: expiresAt,
+        invite_note: data.note?.trim() || null,
+        school_name: school.school_name,
+        school_type: school.school_type,
+        school_level: school.school_level || null,
+        grade_from: school.grade_from,
+        grade_to: school.grade_to,
+        region_id: school.region_id || null,
+        school_township_id: school.township_id || null,
+        school_address: school.address || "",
+        school_phone: school.school_phone,
+        school_email: school.school_email,
+      };
+
+      const { invite_token: _inviteToken, ...safeInsertPayload } = insertPayload;
+      console.info("[Principal invite debug] Supabase insert", {
+        table: "registration_requests",
+        payload: {
+          ...safeInsertPayload,
+          invite_token: "[redacted]",
+        },
+      });
+
+      const { data: request, error } = await supabaseAdmin
+        .from("registration_requests")
+        .insert(insertPayload)
+        .select("id")
+        .single();
+
+      if (error) {
+        console.error("[Principal invite debug] registration_requests insert error", error);
+        throw new Error(error.message || "Unable to create the Principal invite request.");
+      }
+
+      const inviteUrl = await getPrincipalInviteUrl(token);
+      if (emailConfig.mode === "manual") {
+        return {
+          ok: true,
+          requestId: request?.id as string,
+          email: normalizedEmail,
+          emailSent: false,
+          manualMode: true,
+          inviteUrl,
+          message: "EmailJS is not configured in development. Use the manual invite link below.",
+        };
+      }
+
+      await sendPrincipalInviteEmailWithEmailJS({
+        config: emailConfig,
+        principalEmail: normalizedEmail,
+        schoolName: school.school_name,
+        schoolAdminName: profile.full_name?.trim() || user.email || "School Admin",
+        schoolAdminEmail: normalizeEmail(profile.email || user.email || ""),
+        inviteUrl,
+        note: data.note,
+      });
+
+      return {
+        ok: true,
+        requestId: request?.id as string,
+        email: normalizedEmail,
+        emailSent: true,
+        manualMode: false,
+        message: `Principal invite email sent to ${normalizedEmail}.`,
+      };
+    } catch (error) {
+      console.error("[Principal invite debug] caught exception", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        error,
+      });
+      throw error;
+    }
+  });
+
+export const registerSelfPrincipal = createServerFn({ method: "POST" })
+  .validator(registerSelfPrincipalSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { user, profile, school } = await getSchoolAdminContext(supabaseAdmin, data.accessToken);
+    const normalizedEmail = normalizeEmail(user.email || "");
+    const now = new Date().toISOString();
+
+    if (!normalizedEmail) throw new Error("School Admin email was not found.");
+
+    const { data: activePrincipal, error: activePrincipalError } = await supabaseAdmin
+      .from("teachers")
+      .select("id, profile_id")
+      .eq("school_id", school.id)
+      .eq("level", "principal")
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (activePrincipalError) throw activePrincipalError;
+    if (activePrincipal && activePrincipal.profile_id !== user.id) {
+      throw new Error("This school already has an active Principal.");
+    }
+
+    const teacherPayload = {
+      school_id: school.id,
+      profile_id: user.id,
+      level: "principal",
+      status: "active",
+      full_name: profile.full_name || normalizedEmail,
+      email: normalizedEmail,
+      phone: profile.phone || null,
+      updated_at: now,
+    };
+
+    if (activePrincipal?.id) {
+      const { error: updateError } = await supabaseAdmin
+        .from("teachers")
+        .update(teacherPayload)
+        .eq("id", activePrincipal.id);
+
+      if (updateError) throw updateError;
+    } else {
+      const { data: existingTeacher, error: existingTeacherError } = await supabaseAdmin
+        .from("teachers")
+        .select("id")
+        .eq("school_id", school.id)
+        .eq("profile_id", user.id)
+        .eq("level", "principal")
+        .limit(1)
+        .maybeSingle();
+
+      if (existingTeacherError) throw existingTeacherError;
+
+      if (existingTeacher) {
+        const { error: updateError } = await supabaseAdmin
+          .from("teachers")
+          .update(teacherPayload)
+          .eq("id", existingTeacher.id);
+
+        if (updateError) throw updateError;
+      } else {
+        const { error: teacherError } = await supabaseAdmin.from("teachers").insert({
+          ...teacherPayload,
+          created_at: now,
+        });
+
+        if (teacherError) throw teacherError;
+      }
+    }
+
+    return {
+      ok: true,
+      message: "You have been set as the Principal of this school.",
+    };
+  });
+
+export const getPrincipalInvite = createServerFn({ method: "POST" })
+  .validator(tokenSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const principalRequest = await fetchValidPrincipalInvite(supabaseAdmin, data.token);
+
+    const { data: school, error: schoolError } = await supabaseAdmin
+      .from("schools")
+      .select(
+        "id, school_name, school_type, school_level, grade_from, grade_to, address, school_phone, school_email, logo_url, regions(name), townships(name)",
+      )
+      .eq("id", principalRequest.approved_school_id)
+      .maybeSingle();
+
+    if (schoolError) throw schoolError;
+    if (!school) throw new Error("Invited school was not found.");
+
+    return {
+      ok: true,
+      request: {
+        id: principalRequest.id,
+        email: principalRequest.email,
+        note: principalRequest.invite_note || "",
+      },
+      school: toPublicSchool(school as SchoolRow),
+    };
+  });
+
+export const submitPrincipalRegistration = createServerFn({ method: "POST" })
+  .validator(submitPrincipalRegistrationSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const invite = await fetchValidPrincipalInvite(supabaseAdmin, data.token);
+    const now = new Date().toISOString();
+
+    const { data: updatedRequest, error } = await supabaseAdmin
+      .from("registration_requests")
+      .update({
+        status: "pending",
+        full_name_mm: data.fullNameMm,
+        full_name_en: data.fullNameEn,
+        phone: data.phone,
+        date_of_birth: data.dateOfBirth,
+        gender: data.gender,
+        nrc_number: data.nrcNumber,
+        residential_address: data.residentialAddress,
+        state_region_id: data.stateRegionId,
+        township_id: data.townshipId,
+        profile_photo_url: data.profilePhotoUrl,
+        highest_education: data.highestEducation,
+        major: data.major,
+        years_of_teaching_experience: data.yearsOfTeachingExperience,
+        years_of_management_experience: data.yearsOfManagementExperience,
+        previous_school: data.previousSchool,
+        current_position: data.currentPosition,
+        nrc_front_url: data.nrcFrontUrl,
+        nrc_back_url: data.nrcBackUrl,
+        degree_certificate_url: data.degreeCertificateUrl,
+        teaching_license_url: data.teachingLicenseUrl,
+        appointment_letter_url: data.appointmentLetterUrl,
+        resume_url: data.resumeUrl,
+        recommendation_letter_url: data.recommendationLetterUrl,
+        emergency_contact_name: data.emergencyContactName,
+        emergency_contact_relationship: data.emergencyContactRelationship,
+        emergency_contact_phone: data.emergencyContactPhone,
+        updated_at: now,
+      })
+      .eq("id", invite.id)
+      .eq("request_type", "principal")
+      .eq("status", "invited")
+      .select("id")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!updatedRequest) throw new Error("Principal invite is no longer available.");
+
+    return {
+      ok: true,
+      message: "Your information has been submitted and is waiting for approval.",
+    };
+  });
+
+export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
+  .validator(reviewPrincipalSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { user, school } = await getSchoolAdminContext(supabaseAdmin, data.accessToken);
+    const request = await fetchPrincipalRequestForSchool(supabaseAdmin, data.requestId, school.id);
+    const now = new Date().toISOString();
+
+    if (request.status !== "pending") {
+      throw new Error("Only pending principal requests can be reviewed.");
+    }
+
+    if (data.status === "rejected") {
+      if (!data.rejectionReason?.trim()) throw new Error("Rejection reason is required.");
+
+      const { error } = await supabaseAdmin
+        .from("registration_requests")
+        .update({
+          status: "rejected",
+          rejection_reason: data.rejectionReason.trim(),
+          reviewed_by: user.id,
+          reviewed_at: now,
+        })
+        .eq("id", request.id)
+        .eq("request_type", "principal")
+        .eq("approved_school_id", school.id);
+
+      if (error) throw error;
+      return { ok: true };
+    }
+
+    const { data: activePrincipal, error: activePrincipalError } = await supabaseAdmin
+      .from("teachers")
+      .select("id")
+      .eq("school_id", school.id)
+      .eq("level", "principal")
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (activePrincipalError) throw activePrincipalError;
+    if (activePrincipal) throw new Error("This school already has an active Principal.");
+
+    const authUser = await inviteOrResetPrincipalUser(supabaseAdmin, request, user.id);
+    const normalizedEmail = normalizeEmail(request.email);
+
+    const { error: profileError } = await supabaseAdmin.from("profiles").upsert(
+      {
+        id: authUser.id,
+        email: normalizedEmail,
+        full_name: request.full_name_mm,
+        full_name_en: request.full_name_en,
+        phone: request.phone,
+        avatar_url: request.profile_photo_url || null,
+        role: "school_admin",
+        status: "active",
+        date_of_birth: request.date_of_birth,
+        gender: request.gender,
+        nrc_number: request.nrc_number,
+        residential_address: request.residential_address,
+        state_region_id: request.state_region_id,
+        township_id: request.township_id,
+        nrc_front_url: request.nrc_front_url,
+        nrc_back_url: request.nrc_back_url,
+        updated_at: now,
+      },
+      { onConflict: "id" },
+    );
+
+    if (profileError) throw profileError;
+
+    const { error: teacherError } = await supabaseAdmin.from("teachers").insert({
+      school_id: school.id,
+      profile_id: authUser.id,
+      level: "principal",
+      status: "active",
+      full_name: request.full_name_mm,
+      email: normalizedEmail,
+      phone: request.phone,
+      created_at: now,
+      updated_at: now,
+    });
+
+    if (teacherError) throw teacherError;
+
+    const { error: requestError } = await supabaseAdmin
+      .from("registration_requests")
+      .update({
+        status: "approved",
+        approved_profile_id: authUser.id,
+        approved_school_id: school.id,
+        reviewed_by: user.id,
+        reviewed_at: now,
+        rejection_reason: null,
+      })
+      .eq("id", request.id)
+      .eq("request_type", "principal");
+
+    if (requestError) throw requestError;
+
+    return {
+      ok: true,
+      message: `Principal account approved. Password setup email sent to ${normalizedEmail}.`,
+    };
+  });

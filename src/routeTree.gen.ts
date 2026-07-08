@@ -47,6 +47,7 @@ import { Route as SchoolAdminAnalyticsRouteImport } from './routes/school-admin.
 import { Route as SchoolAdminAcademicRouteImport } from './routes/school-admin.academic'
 import { Route as RegisterSchoolAdminRouteImport } from './routes/register.school-admin'
 import { Route as RegisterSchoolRouteImport } from './routes/register.school'
+import { Route as PrincipalRegisterRouteImport } from './routes/principal.register'
 import { Route as AuthSetupPasswordRouteImport } from './routes/auth.setup-password'
 import { Route as RegisterSchoolAdminStatusRouteImport } from './routes/register.school-admin.status'
 import { Route as RegisterSchoolAdminPendingRouteImport } from './routes/register.school-admin.pending'
@@ -244,6 +245,11 @@ const RegisterSchoolRoute = RegisterSchoolRouteImport.update({
   path: '/register/school',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PrincipalRegisterRoute = PrincipalRegisterRouteImport.update({
+  id: '/principal/register',
+  path: '/principal/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthSetupPasswordRoute = AuthSetupPasswordRouteImport.update({
   id: '/setup-password',
   path: '/setup-password',
@@ -278,6 +284,7 @@ export interface FileRoutesByFullPath {
   '/super-admin': typeof SuperAdminRouteWithChildren
   '/support': typeof SupportRoute
   '/auth/setup-password': typeof AuthSetupPasswordRoute
+  '/principal/register': typeof PrincipalRegisterRoute
   '/register/school': typeof RegisterSchoolRoute
   '/register/school-admin': typeof RegisterSchoolAdminRouteWithChildren
   '/school-admin/academic': typeof SchoolAdminAcademicRoute
@@ -320,6 +327,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/support': typeof SupportRoute
   '/auth/setup-password': typeof AuthSetupPasswordRoute
+  '/principal/register': typeof PrincipalRegisterRoute
   '/register/school': typeof RegisterSchoolRoute
   '/register/school-admin': typeof RegisterSchoolAdminRouteWithChildren
   '/school-admin/academic': typeof SchoolAdminAcademicRoute
@@ -364,6 +372,7 @@ export interface FileRoutesById {
   '/super-admin': typeof SuperAdminRouteWithChildren
   '/support': typeof SupportRoute
   '/auth/setup-password': typeof AuthSetupPasswordRoute
+  '/principal/register': typeof PrincipalRegisterRoute
   '/register/school': typeof RegisterSchoolRoute
   '/register/school-admin': typeof RegisterSchoolAdminRouteWithChildren
   '/school-admin/academic': typeof SchoolAdminAcademicRoute
@@ -409,6 +418,7 @@ export interface FileRouteTypes {
     | '/super-admin'
     | '/support'
     | '/auth/setup-password'
+    | '/principal/register'
     | '/register/school'
     | '/register/school-admin'
     | '/school-admin/academic'
@@ -451,6 +461,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/support'
     | '/auth/setup-password'
+    | '/principal/register'
     | '/register/school'
     | '/register/school-admin'
     | '/school-admin/academic'
@@ -494,6 +505,7 @@ export interface FileRouteTypes {
     | '/super-admin'
     | '/support'
     | '/auth/setup-password'
+    | '/principal/register'
     | '/register/school'
     | '/register/school-admin'
     | '/school-admin/academic'
@@ -537,6 +549,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SuperAdminRoute: typeof SuperAdminRouteWithChildren
   SupportRoute: typeof SupportRoute
+  PrincipalRegisterRoute: typeof PrincipalRegisterRoute
   RegisterSchoolRoute: typeof RegisterSchoolRoute
   RegisterSchoolAdminRoute: typeof RegisterSchoolAdminRouteWithChildren
 }
@@ -809,6 +822,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RegisterSchoolRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/principal/register': {
+      id: '/principal/register'
+      path: '/principal/register'
+      fullPath: '/principal/register'
+      preLoaderRoute: typeof PrincipalRegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth/setup-password': {
       id: '/auth/setup-password'
       path: '/setup-password'
@@ -936,6 +956,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SuperAdminRoute: SuperAdminRouteWithChildren,
   SupportRoute: SupportRoute,
+  PrincipalRegisterRoute: PrincipalRegisterRoute,
   RegisterSchoolRoute: RegisterSchoolRoute,
   RegisterSchoolAdminRoute: RegisterSchoolAdminRouteWithChildren,
 }

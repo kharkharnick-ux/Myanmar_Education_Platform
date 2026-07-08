@@ -23,28 +23,8 @@ export async function getSchoolImageUrl(path?: string | null) {
 
   try {
     const folder = objectPath.substring(0, objectPath.lastIndexOf("/"));
-    const fileName = objectPath.substring(objectPath.lastIndexOf("/") + 1);
-    console.log("Bucket:", SCHOOL_IMAGE_BUCKET);
-    console.log("Path:", objectPath);
-    console.log("Original path:", path);
-    console.log("Folder:", folder);
-    console.log("Filename:", fileName);
-    console.log("list() arguments:", { bucket: SCHOOL_IMAGE_BUCKET, folder });
 
-    const { data: folderListData, error: folderListError } = await supabase.storage
-      .from(SCHOOL_IMAGE_BUCKET)
-      .list(folder);
-
-    console.log("Folder list:", folderListData, folderListError);
-    console.log(
-      "Folder contains file:",
-      Boolean(folderListData?.some((item) => item.name === fileName)),
-    );
-
-    console.log("createSignedUrl() arguments:", {
-      bucket: SCHOOL_IMAGE_BUCKET,
-      path: objectPath,
-    });
+    await supabase.storage.from(SCHOOL_IMAGE_BUCKET).list(folder);
 
     const { data, error } = await supabase.storage
       .from(SCHOOL_IMAGE_BUCKET)

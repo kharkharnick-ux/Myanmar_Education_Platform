@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Menu, X, Sparkles, Sun, Moon, LogOut } from "lucide-react";
@@ -28,6 +28,7 @@ const NAV = [
 export function MobileNav() {
   const [open, setOpen] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
   const { theme, mounted, toggle } = useTheme();
   const [profileOpen, setProfileOpen] = useState(false);
 
@@ -47,6 +48,14 @@ export function MobileNav() {
       return data;
     },
   });
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setOpen(false);
+    navigate({
+      to: "/",
+    });
+  }
 
   return (
     <>
@@ -125,7 +134,11 @@ export function MobileNav() {
                     <div className="text-[9px] text-muted-foreground uppercase tracking-wider">Super Admin ERP</div>
                   </div>
                 </div>
-                <button className="glass-panel w-full flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm text-destructive hover:bg-destructive/10 transition-colors">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="glass-panel w-full flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm text-destructive hover:bg-destructive/10 transition-colors"
+                >
                   <LogOut className="h-4 w-4" /> Logout
                 </button>
               </div>

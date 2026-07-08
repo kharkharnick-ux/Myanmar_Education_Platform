@@ -1,6 +1,12 @@
-import { getPublicApprovedSchools, type PublicApprovedSchool } from "@/lib/api/public-schools.functions";
+import {
+  getPublicApprovedSchools,
+  getPublicSchoolDetail,
+  type PublicApprovedSchool,
+  type PublicSchoolDetail,
+} from "@/lib/api/public-schools.functions";
 
 export type School = PublicApprovedSchool;
+export type SchoolDetail = PublicSchoolDetail;
 
 export type Announcement = {
   id: string;
@@ -65,6 +71,10 @@ export async function fetchSchools(region: string): Promise<School[]> {
     if (!region || region === ALL_REGIONS) return true;
     return school.region === region;
   });
+}
+
+export async function fetchSchoolDetail(schoolId: string): Promise<SchoolDetail> {
+  return getPublicSchoolDetail({ data: { schoolId } });
 }
 
 export async function fetchAnnouncements(): Promise<Announcement[]> {

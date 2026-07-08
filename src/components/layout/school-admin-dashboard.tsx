@@ -1,25 +1,41 @@
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import {
   Activity,
   BarChart3,
   Bell,
   BookOpen,
   CalendarDays,
+  CheckCircle2,
   ClipboardCheck,
+  Copy,
   Clock3,
   Download,
+  Eye,
   FileBarChart,
   FileText,
   GraduationCap,
   LayoutDashboard,
   LineChart,
   ListChecks,
+  Loader2,
   Lock,
   LogOut,
+  MailPlus,
+  Menu,
   Megaphone,
   Moon,
   PieChart,
+  RefreshCw,
   School,
   Search,
   Settings,
@@ -32,11 +48,18 @@ import {
   UserCheck,
   UserCog,
   Users,
+  X,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { EmptyState } from "@/components/ui-kit/EmptyState";
 import { GlassCard } from "@/components/ui-kit/GlassCard";
+import {
+  invitePrincipal,
+  registerSelfPrincipal,
+  reviewPrincipalRegistration,
+} from "@/lib/api/principal-account.functions";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { ProfileDrawer } from "./ProfileDrawer";
@@ -89,13 +112,58 @@ const navItems: NavItem[] = [
 ];
 
 const metricCards = [
-  { label: "Total Students", icon: Users },
-  { label: "Total Teachers", icon: GraduationCap },
-  { label: "Total Classes", icon: School },
-  { label: "Today's Attendance", icon: ClipboardCheck },
-  { label: "Absent Students", icon: UserCheck },
-  { label: "Pending Principal Requests", icon: UserCog },
-];
+  { key: "students", label: "Total Students", icon: Users },
+  { key: "teachers", label: "Total Teachers", icon: GraduationCap },
+  { key: "classes", label: "Total Classes", icon: School },
+  { key: "attendance", label: "Today's Attendance", icon: ClipboardCheck },
+  { key: "absent", label: "Absent Students", icon: UserCheck },
+  { key: "principalRequests", label: "Pending Principal Requests", icon: UserCog },
+] as const;
+
+type DashboardMetricKey = (typeof metricCards)[number]["key"];
+
+type DashboardMetric = {
+  value: number;
+  loading: boolean;
+  error: string;
+  live: boolean;
+};
+
+type ActiveAcademicYear = {
+  id: number;
+  name: string;
+  status: string | null;
+};
+
+type NotificationPreview = {
+  id: string;
+  title: string | null;
+  message: string | null;
+  created_at: string | null;
+};
+
+type PerformanceSummary = {
+  score: number | null;
+  status: string;
+  loading: boolean;
+  error: string;
+};
+
+const emptyMetric = (): DashboardMetric => ({
+  value: 0,
+  loading: true,
+  error: "",
+  live: false,
+});
+
+const createInitialDashboardMetrics = (): Record<DashboardMetricKey, DashboardMetric> => ({
+  students: emptyMetric(),
+  teachers: emptyMetric(),
+  classes: emptyMetric(),
+  attendance: emptyMetric(),
+  absent: emptyMetric(),
+  principalRequests: emptyMetric(),
+});
 
 const SCHOOL_IMAGE_BUCKET = "application-school-logos";
 const PROFILE_AVATAR_BUCKET = "avatars";
@@ -135,6 +203,41 @@ const getErrorMessage = (error: unknown, fallback: string) =>
 
 const clearFileInput = (input: HTMLInputElement | null) => {
   if (input) input.value = "";
+};
+
+const getLocalDateString = () => {
+  const date = new Date();
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return offsetDate.toISOString().slice(0, 10);
+};
+
+const safeCount = async (
+  table: string,
+  filters: Array<[string, string | number | boolean | null]>,
+): Promise<{ count: number; error: string; live: boolean }> => {
+  let query = supabase.from(table).select("id", { count: "exact", head: true });
+
+  for (const [column, value] of filters) {
+    query = value === null ? query.is(column, null) : query.eq(column, value);
+  }
+
+  const { count, error } = await query;
+  if (error) return { count: 0, error: error.message, live: false };
+  return { count: count ?? 0, error: "", live: true };
+};
+
+const fetchActiveAcademicYear = async (): Promise<{
+  year: ActiveAcademicYear | null;
+  error: string;
+}> => {
+  const { data, error } = await supabase
+    .from("academic_years")
+    .select("id, name, status")
+    .eq("status", "active")
+    .maybeSingle();
+
+  if (error) return { year: null, error: error.message };
+  return { year: (data as ActiveAcademicYear | null) ?? null, error: "" };
 };
 
 function useSchoolImagePreview(path?: string | null) {
@@ -265,7 +368,8 @@ export function SchoolAdminDashboardProvider({
 
 export function useSchoolAdminAccess() {
   const access = useContext(SchoolAdminContext);
-  if (!access) throw new Error("useSchoolAdminAccess must be used inside SchoolAdminDashboardProvider.");
+  if (!access)
+    throw new Error("useSchoolAdminAccess must be used inside SchoolAdminDashboardProvider.");
   return access;
 }
 
@@ -332,7 +436,11 @@ function SchoolAdminSidebar() {
         >
           <div className="theme-icon-tile-strong h-10 w-10 shrink-0 overflow-hidden rounded-full text-xs font-bold shadow-inner">
             {profileAvatarUrl ? (
-              <img src={profileAvatarUrl} alt="School admin avatar" className="h-full w-full object-cover" />
+              <img
+                src={profileAvatarUrl}
+                alt="School admin avatar"
+                className="h-full w-full object-cover"
+              />
             ) : (
               <span>{profileInitials}</span>
             )}
@@ -393,7 +501,9 @@ function SchoolAdminSidebar() {
           </div>
           <div className="min-w-0">
             <div className="truncate text-sm font-bold glow-text">Myanmar EDU</div>
-            <div className="truncate text-[10px] uppercase tracking-tight text-muted-foreground">School Admin ERP</div>
+            <div className="truncate text-[10px] uppercase tracking-tight text-muted-foreground">
+              School Admin ERP
+            </div>
           </div>
         </div>
 
@@ -404,7 +514,15 @@ function SchoolAdminSidebar() {
             className="glass-panel flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs transition-all hover:glow-ring"
             aria-label="Toggle theme"
           >
-            {mounted ? (theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />) : <div className="h-4 w-4" />}
+            {mounted ? (
+              theme === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )
+            ) : (
+              <div className="h-4 w-4" />
+            )}
             <span>{mounted ? (theme === "dark" ? "Light" : "Dark") : "Theme"}</span>
           </button>
           <button
@@ -422,12 +540,79 @@ function SchoolAdminSidebar() {
 }
 
 function SchoolAdminHeader() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const access = useSchoolAdminAccess();
-  const userInitial = useMemo(() => access.profile.full_name.trim().charAt(0) || "A", [access.profile.full_name]);
+  const { theme, mounted, toggle } = useTheme();
   const schoolLogoUrl = useSchoolImagePreview(access.school.logo_url);
+  const profileName = getProfileDisplayName(access.profile);
+  const profileAvatarUrl = useProfileAvatarPreview(access.profile.avatar_url);
+  const profileInitials = getInitials(profileName || access.profile.email);
+  const [academicYearLabel, setAcademicYearLabel] = useState("Academic year not configured");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadAcademicYear = async () => {
+      const { year } = await fetchActiveAcademicYear();
+      if (!active) return;
+      setAcademicYearLabel(
+        year?.name ? `${year.name} (${year.status || "active"})` : "Academic year not configured",
+      );
+    };
+
+    loadAcademicYear();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [menuOpen]);
+
+  const refreshProfile = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("full_name, email, phone, role, avatar_url")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (error || !data) return;
+
+    access.updateProfile({
+      full_name: data.full_name || user.email?.split("@")[0] || "",
+      email: data.email,
+      phone: data.phone,
+      role: data.role,
+      avatar_url: data.avatar_url,
+    });
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate({ to: "/" });
+  };
 
   return (
-    <header className="aqua-panel gloss-highlight sticky top-4 z-20 mb-6 flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
+    <>
+    <header className="aqua-panel sticky top-4 z-20 mb-6 flex flex-col gap-4 overflow-visible p-4 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 items-center gap-3">
         <div className="theme-icon-tile-strong h-12 w-12 shrink-0 overflow-hidden rounded-2xl">
           {schoolLogoUrl ? (
@@ -446,26 +631,291 @@ function SchoolAdminHeader() {
 
       <div className="flex flex-wrap items-center gap-2">
         <select className="aqua-input h-10 rounded-xl px-3 text-sm" disabled>
-          <option>Academic year not configured</option>
+          <option>{academicYearLabel}</option>
         </select>
         <IconButton label="Notifications" icon={Bell} disabled />
-        <Link
-          to="/school-admin/settings"
-          aria-label="Settings"
-          className="glass-panel inline-flex h-10 w-10 items-center justify-center rounded-xl transition hover:glow-ring"
-        >
-          <Settings className="h-4 w-4" />
-        </Link>
-        <div className="flex h-10 w-10 items-center justify-center rounded-full border border-primary/25 bg-primary/10 text-sm font-bold text-primary">
-          {userInitial}
+        <div className="relative">
+          <button
+            type="button"
+            aria-label="Open dashboard menu"
+            aria-expanded={menuOpen}
+            className="glass-panel inline-flex h-10 w-10 items-center justify-center rounded-xl transition hover:glow-ring"
+            onClick={() => setMenuOpen(true)}
+          >
+            <Menu className="h-4 w-4" />
+          </button>
         </div>
+        <button
+          type="button"
+          onClick={() => setProfileOpen(true)}
+          className="theme-icon-tile-strong flex h-10 w-10 items-center justify-center overflow-hidden rounded-full border border-primary/25 text-xs font-bold shadow-inner"
+          aria-label="Open school admin profile"
+        >
+          {profileAvatarUrl ? (
+            <img
+              src={profileAvatarUrl}
+              alt="School admin avatar"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span>{profileInitials}</span>
+          )}
+        </button>
+        <ProfileDrawer
+          open={profileOpen}
+          onOpenChange={setProfileOpen}
+          onProfileUpdated={refreshProfile}
+          user={{
+            full_name: profileName,
+            email: access.profile.email,
+            phone: access.profile.phone,
+            role: access.profile.role,
+            avatar_url: access.profile.avatar_url,
+          }}
+        />
       </div>
     </header>
+    {menuOpen && (
+      <div className="fixed inset-0 z-[100]">
+        <div
+          className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+          onClick={() => setMenuOpen(false)}
+        />
+        <aside className="aqua-card fixed right-0 top-0 z-[101] flex h-screen w-[90vw] max-w-[320px] flex-col rounded-none p-3 shadow-2xl">
+          <div className="mb-4 flex items-start justify-between">
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false);
+                setProfileOpen(true);
+              }}
+              className="glass-panel mr-2 flex flex-1 items-center gap-3 rounded-xl p-3 text-left"
+            >
+              <div className="theme-icon-tile-strong h-10 w-10 overflow-hidden rounded-full text-xs font-bold shadow-inner">
+                {profileAvatarUrl ? (
+                  <img src={profileAvatarUrl} alt="" className="h-full w-full object-cover" />
+                ) : (
+                  <span>{profileInitials}</span>
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-bold">{profileName}</div>
+                <div className="truncate text-[10px] text-muted-foreground">
+                  {access.profile.email}
+                </div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMenuOpen(false)}
+              className="glass-panel rounded-xl p-3"
+              aria-label="Close menu"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <nav className="flex-1 overflow-y-auto">
+            <ul className="space-y-1">
+              {navItems.map((item) => {
+                const active = location.pathname === item.to;
+                return (
+                  <li key={item.to}>
+                    <Link
+                      to={item.to}
+                      onClick={() => setMenuOpen(false)}
+                      className={cn(
+                        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm",
+                        active ? "theme-active-surface" : "text-muted-foreground hover:bg-accent/35",
+                      )}
+                    >
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+
+          <div className="mt-4 space-y-3 border-t border-border pt-4">
+            <div className="flex items-center gap-3 px-2">
+              <div className="theme-icon-tile-strong h-8 w-8 rounded-lg">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-bold">Myanmar EDU</div>
+                <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                  School Admin ERP
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={toggle}
+                className="glass-panel flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm transition-colors"
+                aria-label="Toggle theme"
+              >
+                {mounted ? (
+                  theme === "dark" ? (
+                    <Sun className="h-4 w-4" />
+                  ) : (
+                    <Moon className="h-4 w-4" />
+                  )
+                ) : (
+                  <div className="h-4 w-4" />
+                )}
+                <span>{mounted ? (theme === "dark" ? "Light" : "Dark") : "Theme"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="glass-panel flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm text-destructive transition-colors hover:bg-destructive/10"
+              >
+                <LogOut className="h-4 w-4" />
+                Logout
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    )}
+    </>
   );
 }
 
 export function SchoolAdminDashboardOverview() {
   const access = useSchoolAdminAccess();
+  const [metrics, setMetrics] = useState<Record<DashboardMetricKey, DashboardMetric>>(
+    createInitialDashboardMetrics,
+  );
+  const [notifications, setNotifications] = useState<NotificationPreview[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(true);
+  const [notificationsError, setNotificationsError] = useState("");
+  const [performance, setPerformance] = useState<PerformanceSummary>({
+    score: null,
+    status: "Waiting for backend data",
+    loading: true,
+    error: "",
+  });
+
+  useEffect(() => {
+    let active = true;
+
+    const fetchDashboardData = async () => {
+      setMetrics(createInitialDashboardMetrics());
+      setNotificationsLoading(true);
+      setNotificationsError("");
+      setPerformance({
+        score: null,
+        status: "Waiting for backend data",
+        loading: true,
+        error: "",
+      });
+
+      const schoolId = access.school.id;
+      const today = getLocalDateString();
+      const { year } = await fetchActiveAcademicYear();
+      if (!active) return;
+
+      const classFilters: Array<[string, string | number | boolean | null]> = [
+        ["school_id", schoolId],
+      ];
+      if (year?.name) classFilters.push(["academic_year", year.name]);
+
+      const [students, teachers, classes, attendance, absent, principalRequests] =
+        await Promise.all([
+          safeCount("students", [["school_id", schoolId]]),
+          safeCount("teachers", [["school_id", schoolId]]),
+          safeCount("school_classes", classFilters),
+          // TODO: Confirm attendance table/column names. Falls back to 0 if attendance_records.attendance_date is not available.
+          safeCount("attendance_records", [
+            ["school_id", schoolId],
+            ["attendance_date", today],
+          ]),
+          // TODO: Confirm absent status enum/value. Falls back to 0 if the table/column is not available.
+          safeCount("attendance_records", [
+            ["school_id", schoolId],
+            ["attendance_date", today],
+            ["status", "absent"],
+          ]),
+          safeCount("registration_requests", [
+            ["approved_school_id", schoolId],
+            ["request_type", "principal"],
+            ["status", "pending"],
+          ]),
+        ]);
+
+      if (!active) return;
+
+      setMetrics({
+        students: {
+          value: students.count,
+          loading: false,
+          error: students.error,
+          live: students.live,
+        },
+        teachers: {
+          value: teachers.count,
+          loading: false,
+          error: teachers.error,
+          live: teachers.live,
+        },
+        classes: { value: classes.count, loading: false, error: classes.error, live: classes.live },
+        attendance: {
+          value: attendance.count,
+          loading: false,
+          error: attendance.error,
+          live: attendance.live,
+        },
+        absent: { value: absent.count, loading: false, error: absent.error, live: absent.live },
+        principalRequests: {
+          value: principalRequests.count,
+          loading: false,
+          error: principalRequests.error,
+          live: principalRequests.live,
+        },
+      });
+
+      // TODO: Confirm notifications table/columns and whether records are school-scoped or user-scoped.
+      const { data: notificationData, error: notificationError } = await supabase
+        .from("notifications")
+        .select("id, title, message, created_at")
+        .eq("school_id", schoolId)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      if (!active) return;
+
+      if (notificationError) {
+        setNotifications([]);
+        setNotificationsError(notificationError.message);
+      } else {
+        setNotifications((notificationData || []) as NotificationPreview[]);
+        setNotificationsError("");
+      }
+      setNotificationsLoading(false);
+
+      const attendanceRate =
+        students.count > 0 && attendance.live
+          ? Math.round((attendance.count / students.count) * 100)
+          : null;
+      setPerformance({
+        score: attendanceRate,
+        status:
+          attendanceRate === null ? "Waiting for backend data" : `${attendanceRate}% Attendance`,
+        loading: false,
+        error: attendance.error || students.error,
+      });
+    };
+
+    fetchDashboardData();
+
+    return () => {
+      active = false;
+    };
+  }, [access.school.id]);
 
   return (
     <div className="space-y-6">
@@ -475,27 +925,67 @@ export function SchoolAdminDashboardOverview() {
         description={`${access.school.school_name} အတွက် overview widgets များ။ Real backend data မရှိသေးသောနေရာများတွင် empty state ပြထားသည်။`}
       />
 
+      {Object.values(metrics).some((metric) => metric.error) && (
+        <div className="glass-panel rounded-2xl border border-destructive/30 p-4 text-sm text-destructive">
+          Some dashboard data is not available yet. Missing tables/columns are shown as safe
+          fallback values.
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {metricCards.map((metric) => (
-          <MetricEmptyCard key={metric.label} icon={metric.icon} label={metric.label} />
+          <MetricCard
+            key={metric.label}
+            icon={metric.icon}
+            label={metric.label}
+            loading={metrics[metric.key].loading}
+            value={metrics[metric.key].value}
+            live={metrics[metric.key].live}
+            error={metrics[metric.key].error}
+          />
         ))}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">
-        <ManagementEmptyCard icon={UserCog} title="Pending Principal Requests" />
-        <ManagementEmptyCard icon={Bell} title="Recent Notifications" />
+        <ManagementSummaryCard
+          icon={UserCog}
+          title="Pending Principal Requests"
+          value={metrics.principalRequests.value}
+          loading={metrics.principalRequests.loading}
+          live={metrics.principalRequests.live}
+          error={metrics.principalRequests.error}
+          emptyDescription="No pending principal requests for this school."
+        />
+        <RecentNotificationsCard
+          notifications={notifications}
+          loading={notificationsLoading}
+          error={notificationsError}
+        />
         <GlassCard className="rounded-[2rem] p-6">
           <div className="mb-4 flex items-center justify-between gap-3">
             <SectionTitle icon={TrendingUp} title="School Performance Score" />
-            <span className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted-foreground">
-              Waiting for backend data
+            <span
+              className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-muted-foreground"
+              title={performance.error || undefined}
+            >
+              {performance.loading ? "Loading..." : performance.status}
             </span>
           </div>
-          <EmptyState
-            icon={Activity}
-            title="No performance data available"
-            description="Attendance, academic, teacher ratio, reports, and school health will appear after backend integration."
-          />
+          {performance.score === null ? (
+            <EmptyState
+              icon={Activity}
+              title="No performance data available"
+              description="Attendance, academic, teacher ratio, reports, and school health will appear after backend integration."
+            />
+          ) : (
+            <div className="rounded-3xl border border-primary/20 bg-primary/5 p-6">
+              <p className="text-sm font-semibold text-muted-foreground">Current score</p>
+              <p className="mt-2 text-4xl font-bold text-foreground">{performance.score}%</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Based on today's available attendance records for this school.
+              </p>
+            </div>
+          )}
         </GlassCard>
       </div>
     </div>
@@ -571,7 +1061,8 @@ export function SchoolProfilePage() {
 
       if (!active) return;
       if (!error && data && "cover_image_url" in data) {
-        const latestCoverPath = (data as { cover_image_url?: string | null }).cover_image_url || null;
+        const latestCoverPath =
+          (data as { cover_image_url?: string | null }).cover_image_url || null;
         setCoverPath(latestCoverPath);
         setSavedProfile((current) => ({ ...current, coverPath: latestCoverPath }));
       }
@@ -658,7 +1149,16 @@ export function SchoolProfilePage() {
       coverPath !== savedProfile.coverPath;
 
     return textChanged || logoChanged || coverChanged;
-  }, [coverFile, coverMarkedForRemoval, coverPath, form, logoFile, logoMarkedForRemoval, logoPath, savedProfile]);
+  }, [
+    coverFile,
+    coverMarkedForRemoval,
+    coverPath,
+    form,
+    logoFile,
+    logoMarkedForRemoval,
+    logoPath,
+    savedProfile,
+  ]);
 
   const uploadSchoolImage = async (file: File, kind: "logo" | "cover") => {
     validateSchoolImageFile(file, kind === "logo" ? "School logo" : "Cover image");
@@ -778,7 +1278,9 @@ export function SchoolProfilePage() {
       .from("schools")
       .update(updatePayload as never)
       .eq("id", access.school.id)
-      .select("school_name, school_phone, school_email, address, website, logo_url, cover_image_url")
+      .select(
+        "school_name, school_phone, school_email, address, website, logo_url, cover_image_url",
+      )
       .maybeSingle();
 
     console.log("school update data", updateData);
@@ -1066,20 +1568,32 @@ export function SchoolProfilePage() {
 
   return (
     <div className="space-y-4">
-      <SectionHeader icon={School} title="School Profile" description="Approved school record မှ ရရှိထားသော အချက်အလက်များကို ပြသထားပါသည်။" />
+      <SectionHeader
+        icon={School}
+        title="School Profile"
+        description="Approved school record မှ ရရှိထားသော အချက်အလက်များကို ပြသထားပါသည်။"
+      />
       <GlassCard className="rounded-[2rem] p-6">
         <div className="mb-6 grid gap-4 md:grid-cols-[220px_1fr]">
           <div className="glass-panel flex min-h-44 flex-col items-center justify-center rounded-3xl p-4 text-center">
             <div className="theme-icon-tile-strong mb-3 h-24 w-24 overflow-hidden rounded-3xl">
               {logoPreviewUrl ? (
-                <img src={logoPreviewUrl} alt="School logo" className="h-full w-full object-cover" />
+                <img
+                  src={logoPreviewUrl}
+                  alt="School logo"
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 <School className="h-10 w-10" />
               )}
             </div>
             <p className="text-sm font-semibold">School Logo</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {logoFile || logoMarkedForRemoval ? "သိမ်းဆည်းမည် နှိပ်ရန် လိုအပ်ပါသည်" : logoPath ? "Logo uploaded" : "PNG, JPG, WEBP / Max 5 MB"}
+              {logoFile || logoMarkedForRemoval
+                ? "သိမ်းဆည်းမည် နှိပ်ရန် လိုအပ်ပါသည်"
+                : logoPath
+                  ? "Logo uploaded"
+                  : "PNG, JPG, WEBP / Max 5 MB"}
             </p>
             <input
               ref={logoInputRef}
@@ -1116,7 +1630,11 @@ export function SchoolProfilePage() {
           </div>
           <div className="glass-panel relative min-h-44 overflow-hidden rounded-3xl p-4">
             {coverPreviewUrl ? (
-              <img src={coverPreviewUrl} alt="School cover" className="absolute inset-0 h-full w-full object-cover" />
+              <img
+                src={coverPreviewUrl}
+                alt="School cover"
+                className="absolute inset-0 h-full w-full object-cover"
+              />
             ) : (
               <div className="absolute inset-0 bg-primary/10" />
             )}
@@ -1124,7 +1642,11 @@ export function SchoolProfilePage() {
             <div className="relative z-10 flex min-h-36 flex-col justify-end">
               <p className="text-sm font-semibold">Cover Image</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {coverFile || coverMarkedForRemoval ? "သိမ်းဆည်းမည် နှိပ်ရန် လိုအပ်ပါသည်" : coverPath ? "Cover image uploaded" : "PNG, JPG, WEBP / Max 5 MB"}
+                {coverFile || coverMarkedForRemoval
+                  ? "သိမ်းဆည်းမည် နှိပ်ရန် လိုအပ်ပါသည်"
+                  : coverPath
+                    ? "Cover image uploaded"
+                    : "PNG, JPG, WEBP / Max 5 MB"}
               </p>
               <input
                 ref={coverInputRef}
@@ -1163,13 +1685,28 @@ export function SchoolProfilePage() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <EditableProfileField label="School Name" value={form.schoolName} onChange={(value) => updateField("schoolName", value)} />
+          <EditableProfileField
+            label="School Name"
+            value={form.schoolName}
+            onChange={(value) => updateField("schoolName", value)}
+          />
           <ProfileField label="School Type" value={access.school.school_type} />
-          <ProfileField label="School Level" value={`${access.school.grade_from} to ${access.school.grade_to}`} />
+          <ProfileField
+            label="School Level"
+            value={`${access.school.grade_from} to ${access.school.grade_to}`}
+          />
           <ProfileField label="Region" value={access.school.region_name || ""} />
           <ProfileField label="Township" value={access.school.township_name || ""} />
-          <EditableProfileField label="Phone" value={form.phone} onChange={(value) => updateField("phone", value)} />
-          <EditableProfileField label="Email" value={form.email} onChange={(value) => updateField("email", value)} />
+          <EditableProfileField
+            label="Phone"
+            value={form.phone}
+            onChange={(value) => updateField("phone", value)}
+          />
+          <EditableProfileField
+            label="Email"
+            value={form.email}
+            onChange={(value) => updateField("email", value)}
+          />
           <ProfileField label="Website" value={access.school.website || ""} />
           <ProfileField label="Principal" value="" />
           <ProfileField label="Vision" value="" multiline />
@@ -1199,7 +1736,9 @@ export function SchoolProfilePage() {
           <button
             type="button"
             className="aqua-button rounded-2xl px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={saving || !hasProfileChanges || !form.schoolName.trim() || !form.address.trim()}
+            disabled={
+              saving || !hasProfileChanges || !form.schoolName.trim() || !form.address.trim()
+            }
             onClick={saveSchoolProfile}
           >
             {saving ? "Saving..." : "သိမ်းဆည်းမည်"}
@@ -1210,7 +1749,745 @@ export function SchoolProfilePage() {
   );
 }
 
+type PrincipalRequestStatus = "invited" | "pending" | "approved" | "rejected";
+
+type PrincipalRegistrationRequest = {
+  id: string;
+  email: string;
+  phone: string | null;
+  full_name_mm: string | null;
+  full_name_en: string | null;
+  date_of_birth: string | null;
+  gender: string | null;
+  nrc_number: string | null;
+  residential_address: string | null;
+  nrc_front_url: string | null;
+  nrc_back_url: string | null;
+  status: PrincipalRequestStatus;
+  invite_note: string | null;
+  invite_token_expires_at: string | null;
+  highest_education: string | null;
+  major: string | null;
+  years_of_teaching_experience: number | null;
+  years_of_management_experience: number | null;
+  previous_school: string | null;
+  current_position: string | null;
+  profile_photo_url: string | null;
+  degree_certificate_url: string | null;
+  teaching_license_url: string | null;
+  appointment_letter_url: string | null;
+  resume_url: string | null;
+  recommendation_letter_url: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_relationship: string | null;
+  emergency_contact_phone: string | null;
+  rejection_reason: string | null;
+  reviewed_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+type ActivePrincipal = {
+  id: string;
+  profile_id: string | null;
+  school_id: string | null;
+  level: string | null;
+  created_at: string | null;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  avatar_url: string | null;
+};
+
+type ActivePrincipalProfile = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  avatar_url: string | null;
+  status: string | null;
+};
+
+type PrincipalTab = "invited" | "pending" | "active";
+type PrincipalMode = "self" | "invite";
+
+const principalRegistrationRequestSelect = [
+  "id",
+  "email",
+  "phone",
+  "full_name_mm",
+  "full_name_en",
+  "date_of_birth",
+  "gender",
+  "nrc_number",
+  "residential_address",
+  "nrc_front_url",
+  "nrc_back_url",
+  "status",
+  "invite_note",
+  "invite_token_expires_at",
+  "highest_education",
+  "major",
+  "years_of_teaching_experience",
+  "years_of_management_experience",
+  "previous_school",
+  "current_position",
+  "profile_photo_url",
+  "degree_certificate_url",
+  "teaching_license_url",
+  "appointment_letter_url",
+  "resume_url",
+  "recommendation_letter_url",
+  "emergency_contact_name",
+  "emergency_contact_relationship",
+  "emergency_contact_phone",
+  "rejection_reason",
+  "reviewed_at",
+  "created_at",
+  "updated_at",
+].join(", ");
+
+type PrincipalSelfFormValues = {
+  fullNameMm: string;
+  fullNameEn: string;
+  phone: string;
+  dateOfBirth: string;
+  gender: string;
+  nrcNumber: string;
+  residentialAddress: string;
+  stateRegionId: string;
+  townshipId: string;
+  highestEducation: string;
+  major: string;
+  yearsOfTeachingExperience: string;
+  yearsOfManagementExperience: string;
+  previousSchool: string;
+  currentPosition: string;
+  emergencyContactName: string;
+  emergencyContactRelationship: string;
+  emergencyContactPhone: string;
+  declarationAccepted: boolean;
+};
+
+type PrincipalSelfFileKey =
+  | "profilePhoto"
+  | "nrcFront"
+  | "nrcBack"
+  | "degreeCertificate"
+  | "teachingLicense"
+  | "appointmentLetter"
+  | "resume"
+  | "recommendationLetter";
+
+type RegionOption = { id: number; name: string };
+type TownshipOption = { id: number; region_id: number; name: string };
+
+const principalSelfFileLabels: Record<PrincipalSelfFileKey, string> = {
+  profilePhoto: "Profile photo",
+  nrcFront: "NRC front",
+  nrcBack: "NRC back",
+  degreeCertificate: "Degree certificate",
+  teachingLicense: "Teaching license",
+  appointmentLetter: "Appointment letter",
+  resume: "Resume",
+  recommendationLetter: "Recommendation letter",
+};
+
+const principalSelfFileKeys: PrincipalSelfFileKey[] = [
+  "profilePhoto",
+  "nrcFront",
+  "nrcBack",
+  "degreeCertificate",
+  "teachingLicense",
+  "appointmentLetter",
+  "resume",
+  "recommendationLetter",
+];
+
+const sanitizeDashboardFileName = (name: string) =>
+  name.replace(/[^a-zA-Z0-9.\-_]+/g, "-").slice(0, 90);
+
 export function PrincipalManagementPage() {
+  const access = useSchoolAdminAccess();
+  const [tab, setTab] = useState<PrincipalTab>("invited");
+  const [principalMode, setPrincipalMode] = useState<PrincipalMode | null>(null);
+  const [requests, setRequests] = useState<PrincipalRegistrationRequest[]>([]);
+  const [activePrincipal, setActivePrincipal] = useState<ActivePrincipal | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteNote, setInviteNote] = useState("");
+  const [message, setMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [inviting, setInviting] = useState(false);
+  const [manualInviteLink, setManualInviteLink] = useState("");
+  const [manualInviteCopied, setManualInviteCopied] = useState(false);
+  const [reviewingId, setReviewingId] = useState("");
+  const [rejectingId, setRejectingId] = useState("");
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [selfForm, setSelfForm] = useState<PrincipalSelfFormValues>({
+    fullNameMm: access.profile.full_name || "",
+    fullNameEn: "",
+    phone: access.profile.phone || "",
+    dateOfBirth: "",
+    gender: "",
+    nrcNumber: "",
+    residentialAddress: "",
+    stateRegionId: "",
+    townshipId: "",
+    highestEducation: "",
+    major: "",
+    yearsOfTeachingExperience: "0",
+    yearsOfManagementExperience: "0",
+    previousSchool: "",
+    currentPosition: "Principal",
+    emergencyContactName: "",
+    emergencyContactRelationship: "",
+    emergencyContactPhone: "",
+    declarationAccepted: false,
+  });
+  const [selfFiles, setSelfFiles] = useState<Partial<Record<PrincipalSelfFileKey, File>>>({});
+  const [regions, setRegions] = useState<RegionOption[]>([]);
+  const [townships, setTownships] = useState<TownshipOption[]>([]);
+  const [selfSubmitting, setSelfSubmitting] = useState(false);
+
+  const invitedRequests = requests.filter((request) => request.status === "invited");
+  const pendingRequests = requests.filter((request) => request.status === "pending");
+
+  const loadPrincipalData = async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
+    setRefreshing(!showSpinner);
+    setErrorMessage("");
+
+    try {
+      const { data: requestData, error: requestError } = await supabase
+        .from("registration_requests")
+        .select(principalRegistrationRequestSelect)
+        .eq("request_type", "principal")
+        .eq("approved_school_id", access.school.id)
+        .order("created_at", { ascending: false });
+
+      if (requestError) throw requestError;
+      setRequests((requestData || []) as unknown as PrincipalRegistrationRequest[]);
+
+      const { data: teacherData, error: teacherError } = await supabase
+        .from("teachers")
+        .select("id, profile_id, school_id, level, created_at")
+        .eq("school_id", access.school.id)
+        .eq("level", "principal")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (teacherError) {
+        console.error("Active principal teacher query error", teacherError);
+        throw teacherError;
+      }
+
+      if (!teacherData) {
+        setActivePrincipal(null);
+        return;
+      }
+
+      const teacher = teacherData as Pick<
+        ActivePrincipal,
+        "id" | "profile_id" | "school_id" | "level" | "created_at"
+      >;
+      let profile: ActivePrincipalProfile | null = null;
+
+      if (teacher.profile_id) {
+        const { data: profileData, error: profileError } = await supabase
+          .from("profiles")
+          .select("id, full_name, email, phone, avatar_url, status")
+          .eq("id", teacher.profile_id)
+          .maybeSingle();
+
+        if (profileError) {
+          console.error("Active principal profile query error", profileError);
+          throw profileError;
+        }
+
+        profile = profileData as ActivePrincipalProfile | null;
+      }
+
+      setActivePrincipal({
+        id: teacher.id,
+        profile_id: teacher.profile_id,
+        school_id: teacher.school_id,
+        level: teacher.level,
+        created_at: teacher.created_at,
+        full_name: profile?.full_name || null,
+        email: profile?.email || null,
+        phone: profile?.phone || null,
+        avatar_url: profile?.avatar_url || null,
+      });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to load Principal data.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPrincipalData();
+  }, [access.school.id]);
+
+  useEffect(() => {
+    supabase
+      .from("regions")
+      .select("id, name")
+      .order("name")
+      .then(({ data }) => setRegions((data || []) as RegionOption[]));
+  }, []);
+
+  useEffect(() => {
+    if (!selfForm.stateRegionId) {
+      setTownships([]);
+      setSelfForm((current) => ({ ...current, townshipId: "" }));
+      return;
+    }
+
+    supabase
+      .from("townships")
+      .select("id, region_id, name")
+      .eq("region_id", Number(selfForm.stateRegionId))
+      .order("name")
+      .then(({ data }) => setTownships((data || []) as TownshipOption[]));
+  }, [selfForm.stateRegionId]);
+
+  const getAccessToken = async () => {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    const token = data.session?.access_token;
+    if (!token) throw new Error("Please sign in again to continue.");
+    return token;
+  };
+
+  const handleInvite = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const normalizedEmail = inviteEmail.trim().toLowerCase();
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      setErrorMessage("Enter a valid Principal email.");
+      return;
+    }
+
+    setInviting(true);
+    setMessage("");
+    setErrorMessage("");
+    setManualInviteLink("");
+    setManualInviteCopied(false);
+
+    try {
+      const accessToken = await getAccessToken();
+      const result = await invitePrincipal({
+        data: {
+          accessToken,
+          email: normalizedEmail,
+          note: inviteNote || undefined,
+        },
+      });
+
+      setMessage(
+        result.emailSent ? `Principal invite email sent to ${result.email}.` : result.message,
+      );
+      setManualInviteLink(result.manualMode ? result.inviteUrl : "");
+      setInviteEmail("");
+      setInviteNote("");
+      await loadPrincipalData(false);
+    } catch (error) {
+      console.error("[Principal invite UI] Unable to create Principal invite", error);
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to create Principal invite.",
+      );
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const copyManualInviteLink = async () => {
+    if (!manualInviteLink) return;
+
+    try {
+      await navigator.clipboard.writeText(manualInviteLink);
+      setManualInviteCopied(true);
+    } catch (error) {
+      console.error("[Principal invite UI] Unable to copy manual invite link", error);
+      setErrorMessage("Unable to copy the Principal invite link.");
+    }
+  };
+
+  const updateSelfForm = (key: keyof PrincipalSelfFormValues, value: string | boolean) => {
+    setSelfForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const validateSelfPrincipalForm = () => {
+    const required: Array<[keyof PrincipalSelfFormValues, string]> = [
+      ["fullNameMm", "Full name is required."],
+      ["fullNameEn", "English name is required."],
+      ["phone", "Phone is required."],
+      ["dateOfBirth", "Date of birth is required."],
+      ["gender", "Gender is required."],
+      ["nrcNumber", "NRC number is required."],
+      ["residentialAddress", "Residential address is required."],
+      ["highestEducation", "Highest education is required."],
+      ["major", "Major is required."],
+      ["currentPosition", "Current position is required."],
+      ["emergencyContactName", "Emergency contact name is required."],
+      ["emergencyContactRelationship", "Emergency contact relationship is required."],
+      ["emergencyContactPhone", "Emergency contact phone is required."],
+    ];
+
+    for (const [key, error] of required) {
+      if (!String(selfForm[key] || "").trim()) return error;
+    }
+
+    if (!selfForm.stateRegionId) return "State/Region is required.";
+    if (!selfForm.townshipId) return "Township is required.";
+    if (!selfFiles.nrcFront || !selfFiles.nrcBack) return "NRC front and back files are required.";
+    if (!selfForm.declarationAccepted) return "Please accept the declaration.";
+    return "";
+  };
+
+  const uploadSelfPrincipalFile = async (
+    key: PrincipalSelfFileKey,
+    bucket: string,
+    folder: string,
+    stamp: number,
+  ) => {
+    const file = selfFiles[key];
+    if (!file) return null;
+
+    const path = `${folder}/${stamp}-${key}-${sanitizeDashboardFileName(file.name)}`;
+    const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
+      cacheControl: "3600",
+      upsert: false,
+    });
+
+    if (error) throw error;
+    return data?.path || null;
+  };
+
+  const handleSelfPrincipalConfirm = async () => {
+    setMessage("");
+    setErrorMessage("");
+    setManualInviteLink("");
+    setManualInviteCopied(false);
+    setSelfSubmitting(true);
+
+    try {
+      const accessToken = await getAccessToken();
+      const result = await registerSelfPrincipal({
+        data: {
+          accessToken,
+        },
+      });
+
+      setMessage(result.message);
+      setTab("active");
+      await loadPrincipalData(false);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to register School Admin as Principal.",
+      );
+    } finally {
+      setSelfSubmitting(false);
+    }
+  };
+
+  const reviewRequest = async (requestId: string, status: "approved" | "rejected") => {
+    if (status === "rejected" && !rejectionReason.trim()) {
+      setErrorMessage("Rejection reason is required.");
+      return;
+    }
+
+    setReviewingId(requestId);
+    setMessage("");
+    setErrorMessage("");
+    setManualInviteLink("");
+    setManualInviteCopied(false);
+
+    try {
+      const accessToken = await getAccessToken();
+      const result = await reviewPrincipalRegistration({
+        data: {
+          accessToken,
+          requestId,
+          status,
+          rejectionReason: status === "rejected" ? rejectionReason.trim() : undefined,
+        },
+      });
+
+      setMessage(
+        result.message ||
+          (status === "approved" ? "Principal approved." : "Principal request rejected."),
+      );
+      setRejectingId("");
+      setRejectionReason("");
+      await loadPrincipalData(false);
+      if (status === "approved") setTab("active");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to review Principal request.",
+      );
+    } finally {
+      setReviewingId("");
+    }
+  };
+
+  const tabs: Array<{ key: PrincipalTab; label: string; count: number; icon: LucideIcon }> = [
+    { key: "invited", label: "Pending Invitations", count: invitedRequests.length, icon: MailPlus },
+    { key: "pending", label: "Pending Reviews", count: pendingRequests.length, icon: Clock3 },
+    { key: "active", label: "Active Principal", count: activePrincipal ? 1 : 0, icon: ShieldCheck },
+  ];
+
+  return (
+    <div className="space-y-4 pb-8">
+      <SectionHeader
+        icon={UserCog}
+        title="Principal Management"
+        description={`Invite, review, and manage the Principal account for ${access.school.school_name}.`}
+      />
+
+      <GlassCard className="rounded-[2rem] p-6">
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <SectionTitle
+            icon={principalMode === "self" ? UserCheck : MailPlus}
+            title="Principal Setup"
+          />
+          <button
+            type="button"
+            className="glass-panel inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => loadPrincipalData(false)}
+            disabled={loading || refreshing}
+          >
+            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+            Refresh
+          </button>
+        </div>
+
+        <div className="mb-5 grid gap-3 md:grid-cols-2">
+          <button
+            type="button"
+            className={cn(
+              "rounded-3xl border p-4 text-left transition",
+              principalMode === "self"
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => {
+              setPrincipalMode("self");
+              setManualInviteLink("");
+              setManualInviteCopied(false);
+            }}
+          >
+            <span className="flex items-center gap-2 text-sm font-bold">
+              <UserCheck className="h-4 w-4" />
+              I am the Principal
+            </span>
+            <span className="mt-2 block text-xs leading-5">
+              Set your current School Admin account as the Principal.
+            </span>
+          </button>
+          <button
+            type="button"
+            className={cn(
+              "rounded-3xl border p-4 text-left transition",
+              principalMode === "invite"
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border bg-muted/20 text-muted-foreground hover:bg-muted/40",
+            )}
+            onClick={() => setPrincipalMode("invite")}
+          >
+            <span className="flex items-center gap-2 text-sm font-bold">
+              <MailPlus className="h-4 w-4" />
+              Invite Another Principal
+            </span>
+            <span className="mt-2 block text-xs leading-5">
+              Enter a new user email and send the invitation by email.
+            </span>
+          </button>
+        </div>
+
+        {principalMode === "self" && (
+          <div className="rounded-3xl border border-primary/20 bg-primary/5 p-5">
+            <SectionTitle icon={UserCheck} title="Confirm Principal Role" />
+            <p className="mt-3 text-sm font-semibold text-foreground">
+              You are setting yourself as the Principal of this school.
+            </p>
+            <button
+              type="button"
+              className="aqua-button mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+              onClick={handleSelfPrincipalConfirm}
+              disabled={selfSubmitting || Boolean(activePrincipal)}
+            >
+              {selfSubmitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <UserCheck className="h-4 w-4" />
+              )}
+              {selfSubmitting ? "Confirming..." : "Confirm as Principal"}
+            </button>
+          </div>
+        )}
+
+        {principalMode === "invite" && (
+          <PrincipalInviteForm
+            email={inviteEmail}
+            note={inviteNote}
+            inviting={inviting}
+            activePrincipal={Boolean(activePrincipal)}
+            onEmailChange={setInviteEmail}
+            onNoteChange={setInviteNote}
+            onSubmit={handleInvite}
+          />
+        )}
+
+        {principalMode && activePrincipal && (
+          <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-semibold text-amber-700 dark:text-amber-200">
+            This school already has an active Principal. New setup actions are disabled until the
+            active Principal changes.
+          </div>
+        )}
+
+        {message && (
+          <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm font-semibold text-emerald-600 dark:text-emerald-300">
+            {message}
+          </div>
+        )}
+
+        {manualInviteLink && (
+          <div className="mt-4 rounded-3xl border border-amber-500/30 bg-amber-500/10 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="block min-w-0 flex-1 space-y-2">
+                <span className="text-sm font-semibold text-amber-700 dark:text-amber-200">
+                  Development manual invite link
+                </span>
+                <input
+                  className="aqua-input w-full rounded-2xl px-4 py-3 text-sm"
+                  value={manualInviteLink}
+                  readOnly
+                />
+              </label>
+              <button
+                type="button"
+                className="glass-panel inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-amber-700 transition hover:glow-ring dark:text-amber-200"
+                onClick={copyManualInviteLink}
+              >
+                {manualInviteCopied ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+                {manualInviteCopied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {errorMessage && (
+          <div className="mt-4 rounded-2xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        )}
+      </GlassCard>
+
+      {principalMode &&
+        <>
+          <div className="glass-panel flex flex-col gap-2 rounded-3xl p-2 sm:flex-row">
+            {tabs.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                className={cn(
+                  "inline-flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold transition",
+                  tab === item.key
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                )}
+                onClick={() => setTab(item.key)}
+              >
+                <item.icon className="h-4 w-4" />
+                <span>{item.label}</span>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-xs",
+                    tab === item.key ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {item.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {loading ? (
+            <GlassCard className="rounded-[2rem] p-8 text-center text-sm text-muted-foreground">
+              <Loader2 className="mx-auto mb-3 h-6 w-6 animate-spin text-primary" />
+              Loading Principal data...
+            </GlassCard>
+          ) : (
+            <>
+          {tab === "invited" && (
+            <div className="grid gap-4 xl:grid-cols-2">
+              {invitedRequests.length > 0 ? (
+                invitedRequests.map((request) => (
+                  <PrincipalInviteCard key={request.id} request={request} />
+                ))
+              ) : (
+                <EmptyState
+                  icon={MailPlus}
+                  title="No pending invitations"
+                  description="Invited Principal links that are not submitted yet will appear here."
+                />
+              )}
+            </div>
+          )}
+
+          {tab === "pending" && (
+            <div className="space-y-4">
+              {pendingRequests.length > 0 ? (
+                pendingRequests.map((request) => (
+                  <PrincipalReviewCard
+                    key={request.id}
+                    request={request}
+                    reviewing={reviewingId === request.id}
+                    rejecting={rejectingId === request.id}
+                    rejectionReason={rejectionReason}
+                    onRejectingChange={(active) => {
+                      setRejectingId(active ? request.id : "");
+                      setRejectionReason("");
+                    }}
+                    onRejectionReasonChange={setRejectionReason}
+                    onApprove={() => reviewRequest(request.id, "approved")}
+                    onReject={() => reviewRequest(request.id, "rejected")}
+                  />
+                ))
+              ) : (
+                <EmptyState
+                  icon={Clock3}
+                  title="No pending reviews"
+                  description="Submitted Principal registration forms waiting for School Admin review will appear here."
+                />
+              )}
+            </div>
+          )}
+
+          {tab === "active" && (
+            <PrincipalActiveCard
+              principal={activePrincipal}
+              schoolName={access.school.school_name}
+            />
+          )}
+            </>
+          )}
+        </>
+      }
+    </div>
+  );
+}
+
+function PrincipalManagementPlaceholderPage() {
   return (
     <div className="space-y-4">
       <SectionHeader
@@ -1227,10 +2504,646 @@ export function PrincipalManagementPage() {
   );
 }
 
+function PrincipalInviteForm({
+  email,
+  note,
+  inviting,
+  activePrincipal,
+  onEmailChange,
+  onNoteChange,
+  onSubmit,
+}: {
+  email: string;
+  note: string;
+  inviting: boolean;
+  activePrincipal: boolean;
+  onEmailChange: (value: string) => void;
+  onNoteChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <form
+      className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)]"
+      onSubmit={onSubmit}
+    >
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="block space-y-2">
+          <span className="text-sm font-semibold">Principal Email</span>
+          <input
+            type="email"
+            className="aqua-input w-full rounded-2xl px-4 py-3 text-sm"
+            value={email}
+            onChange={(event) => onEmailChange(event.target.value)}
+            placeholder="principal@example.com"
+            required
+          />
+          <span className="block text-xs text-muted-foreground">
+            This email must belong to a new user.
+          </span>
+        </label>
+        <label className="block space-y-2">
+          <span className="text-sm font-semibold">Optional Note</span>
+          <input
+            className="aqua-input w-full rounded-2xl px-4 py-3 text-sm"
+            value={note}
+            onChange={(event) => onNoteChange(event.target.value)}
+            placeholder="Short message for the invited Principal"
+          />
+        </label>
+      </div>
+      <div className="flex items-end">
+        <button
+          type="submit"
+          className="aqua-button inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={inviting || !email.trim() || activePrincipal}
+        >
+          {inviting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <MailPlus className="h-4 w-4" />
+          )}
+          {inviting ? "Sending Email..." : "Send Principal Invite"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function PrincipalSelfForm({
+  access,
+  activePrincipal,
+  form,
+  files,
+  regions,
+  townships,
+  submitting,
+  onSubmit,
+  onFormChange,
+  onFileChange,
+}: {
+  access: SchoolAdminAccess;
+  activePrincipal: boolean;
+  form: PrincipalSelfFormValues;
+  files: Partial<Record<PrincipalSelfFileKey, File>>;
+  regions: RegionOption[];
+  townships: TownshipOption[];
+  submitting: boolean;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onFormChange: (key: keyof PrincipalSelfFormValues, value: string | boolean) => void;
+  onFileChange: (key: PrincipalSelfFileKey, file: File | undefined) => void;
+}) {
+  return (
+    <form className="space-y-5" onSubmit={onSubmit}>
+      <div className="grid gap-4 md:grid-cols-2">
+        <PrincipalTextInput
+          label="Full name"
+          value={form.fullNameMm}
+          onChange={(value) => onFormChange("fullNameMm", value)}
+        />
+        <PrincipalTextInput
+          label="English name"
+          value={form.fullNameEn}
+          onChange={(value) => onFormChange("fullNameEn", value)}
+        />
+        <PrincipalTextInput label="Email" value={access.profile.email} readOnly />
+        <PrincipalTextInput
+          label="Phone"
+          value={form.phone}
+          onChange={(value) => onFormChange("phone", value)}
+        />
+        <PrincipalTextInput
+          label="Date of birth"
+          type="date"
+          value={form.dateOfBirth}
+          onChange={(value) => onFormChange("dateOfBirth", value)}
+        />
+        <PrincipalSelectInput
+          label="Gender"
+          value={form.gender}
+          onChange={(value) => onFormChange("gender", value)}
+          options={["Male", "Female", "Other"]}
+        />
+        <PrincipalTextInput
+          label="NRC number"
+          value={form.nrcNumber}
+          onChange={(value) => onFormChange("nrcNumber", value)}
+        />
+        <PrincipalSelectInput
+          label="State/Region"
+          value={form.stateRegionId}
+          onChange={(value) => onFormChange("stateRegionId", value)}
+          options={regions.map((region) => ({ value: String(region.id), label: region.name }))}
+        />
+        <PrincipalSelectInput
+          label="Township"
+          value={form.townshipId}
+          onChange={(value) => onFormChange("townshipId", value)}
+          options={townships.map((township) => ({
+            value: String(township.id),
+            label: township.name,
+          }))}
+        />
+        <label className="space-y-2 md:col-span-2">
+          <span className="text-sm font-semibold">Residential address</span>
+          <textarea
+            className="aqua-input min-h-24 w-full rounded-2xl px-4 py-3 text-sm"
+            value={form.residentialAddress}
+            onChange={(event) => onFormChange("residentialAddress", event.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <PrincipalTextInput
+          label="Highest education"
+          value={form.highestEducation}
+          onChange={(value) => onFormChange("highestEducation", value)}
+        />
+        <PrincipalTextInput
+          label="Major"
+          value={form.major}
+          onChange={(value) => onFormChange("major", value)}
+        />
+        <PrincipalTextInput
+          label="Teaching experience years"
+          type="number"
+          value={form.yearsOfTeachingExperience}
+          onChange={(value) => onFormChange("yearsOfTeachingExperience", value)}
+        />
+        <PrincipalTextInput
+          label="Management experience years"
+          type="number"
+          value={form.yearsOfManagementExperience}
+          onChange={(value) => onFormChange("yearsOfManagementExperience", value)}
+        />
+        <PrincipalTextInput
+          label="Previous school"
+          value={form.previousSchool}
+          onChange={(value) => onFormChange("previousSchool", value)}
+        />
+        <PrincipalTextInput
+          label="Current position"
+          value={form.currentPosition}
+          onChange={(value) => onFormChange("currentPosition", value)}
+        />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {principalSelfFileKeys.map((key) => (
+          <PrincipalFileInput
+            key={key}
+            label={`${principalSelfFileLabels[key]}${
+              key === "nrcFront" || key === "nrcBack" ? " *" : ""
+            }`}
+            file={files[key]}
+            onChange={(file) => onFileChange(key, file)}
+          />
+        ))}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <PrincipalTextInput
+          label="Emergency contact name"
+          value={form.emergencyContactName}
+          onChange={(value) => onFormChange("emergencyContactName", value)}
+        />
+        <PrincipalTextInput
+          label="Relationship"
+          value={form.emergencyContactRelationship}
+          onChange={(value) => onFormChange("emergencyContactRelationship", value)}
+        />
+        <PrincipalTextInput
+          label="Emergency phone"
+          value={form.emergencyContactPhone}
+          onChange={(value) => onFormChange("emergencyContactPhone", value)}
+        />
+      </div>
+
+      <label className="glass-panel flex items-start gap-3 rounded-2xl p-4 text-sm">
+        <input
+          type="checkbox"
+          checked={form.declarationAccepted}
+          onChange={(event) => onFormChange("declarationAccepted", event.target.checked)}
+          className="mt-1"
+        />
+        <span>I confirm that the Principal information provided is true and correct.</span>
+      </label>
+
+      <button
+        type="submit"
+        className="aqua-button inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={submitting || activePrincipal}
+      >
+        {submitting ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <UserCheck className="h-4 w-4" />
+        )}
+        {submitting ? "Saving Principal..." : "Save as Principal"}
+      </button>
+    </form>
+  );
+}
+
+function PrincipalTextInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  readOnly = false,
+}: {
+  label: string;
+  value: string;
+  onChange?: (value: string) => void;
+  type?: string;
+  readOnly?: boolean;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="text-sm font-semibold">{label}</span>
+      <input
+        type={type}
+        value={value}
+        readOnly={readOnly}
+        onChange={(event) => onChange?.(event.target.value)}
+        className="aqua-input w-full rounded-2xl px-4 py-3 text-sm"
+      />
+    </label>
+  );
+}
+
+function PrincipalSelectInput({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<string | { value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="space-y-2">
+      <span className="text-sm font-semibold">{label}</span>
+      <select
+        className="aqua-input w-full rounded-2xl px-4 py-3 text-sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">Select</option>
+        {options.map((option) => {
+          const item = typeof option === "string" ? { value: option, label: option } : option;
+          return (
+            <option key={item.value} value={item.value}>
+              {item.label}
+            </option>
+          );
+        })}
+      </select>
+    </label>
+  );
+}
+
+function PrincipalFileInput({
+  label,
+  file,
+  onChange,
+}: {
+  label: string;
+  file?: File;
+  onChange: (file: File | undefined) => void;
+}) {
+  return (
+    <label className="glass-panel flex cursor-pointer items-center justify-between gap-3 rounded-2xl p-4">
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold">{label}</span>
+        <span className="mt-1 block truncate text-xs text-muted-foreground">
+          {file?.name || "Choose file"}
+        </span>
+      </span>
+      <Upload className="h-4 w-4 shrink-0 text-primary" />
+      <input
+        type="file"
+        className="hidden"
+        onChange={(event) => onChange(event.target.files?.[0])}
+      />
+    </label>
+  );
+}
+
+function PrincipalInviteCard({ request }: { request: PrincipalRegistrationRequest }) {
+  const expiresAt = request.invite_token_expires_at
+    ? formatDashboardDate(request.invite_token_expires_at)
+    : "No expiry date";
+
+  return (
+    <GlassCard className="rounded-[2rem] p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <SectionTitle icon={MailPlus} title={request.email} />
+          <p className="mt-2 text-sm text-muted-foreground">
+            Created {formatDashboardDate(request.created_at)}
+          </p>
+        </div>
+        <StatusPill icon={Clock3} label="Invited" tone="amber" />
+      </div>
+      {request.invite_note && (
+        <p className="mt-4 rounded-2xl border border-border/60 bg-muted/20 p-3 text-sm text-muted-foreground">
+          {request.invite_note}
+        </p>
+      )}
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <DetailItem label="Expires" value={expiresAt} />
+        <DetailItem label="Status" value="Waiting for registration form" />
+      </div>
+    </GlassCard>
+  );
+}
+
+function PrincipalReviewCard({
+  request,
+  reviewing,
+  rejecting,
+  rejectionReason,
+  onRejectingChange,
+  onRejectionReasonChange,
+  onApprove,
+  onReject,
+}: {
+  request: PrincipalRegistrationRequest;
+  reviewing: boolean;
+  rejecting: boolean;
+  rejectionReason: string;
+  onRejectingChange: (active: boolean) => void;
+  onRejectionReasonChange: (value: string) => void;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const documents = [
+    ["NRC Front", request.nrc_front_url],
+    ["NRC Back", request.nrc_back_url],
+    ["Degree Certificate", request.degree_certificate_url],
+    ["Teaching License", request.teaching_license_url],
+    ["Appointment Letter", request.appointment_letter_url],
+    ["Resume", request.resume_url],
+    ["Recommendation Letter", request.recommendation_letter_url],
+  ].filter(([, url]) => Boolean(url));
+
+  return (
+    <GlassCard className="rounded-[2rem] p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <SectionTitle
+              icon={Eye}
+              title={request.full_name_mm || request.full_name_en || request.email}
+            />
+            <StatusPill icon={Clock3} label="Pending Review" tone="amber" />
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Submitted {formatDashboardDate(request.updated_at || request.created_at)}
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            className="aqua-button inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={onApprove}
+            disabled={reviewing}
+          >
+            {reviewing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4" />
+            )}
+            Approve
+          </button>
+          <button
+            type="button"
+            className="glass-panel inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-bold text-destructive disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => onRejectingChange(!rejecting)}
+            disabled={reviewing}
+          >
+            <XCircle className="h-4 w-4" />
+            Reject
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <div className="rounded-3xl border border-border/60 bg-muted/20 p-4">
+          <SectionTitle icon={UserCheck} title="Personal" />
+          <div className="mt-4 grid gap-3">
+            <DetailItem label="Email" value={request.email} />
+            <DetailItem label="Phone" value={request.phone} />
+            <DetailItem label="English Name" value={request.full_name_en} />
+            <DetailItem label="Date of Birth" value={formatDashboardDate(request.date_of_birth)} />
+            <DetailItem label="Gender" value={request.gender} />
+            <DetailItem label="NRC" value={request.nrc_number} />
+            <DetailItem label="Address" value={request.residential_address} />
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-border/60 bg-muted/20 p-4">
+          <SectionTitle icon={GraduationCap} title="Professional" />
+          <div className="mt-4 grid gap-3">
+            <DetailItem label="Highest Education" value={request.highest_education} />
+            <DetailItem label="Major" value={request.major} />
+            <DetailItem
+              label="Teaching Experience"
+              value={formatYearCount(request.years_of_teaching_experience)}
+            />
+            <DetailItem
+              label="Management Experience"
+              value={formatYearCount(request.years_of_management_experience)}
+            />
+            <DetailItem label="Previous School" value={request.previous_school} />
+            <DetailItem label="Current Position" value={request.current_position} />
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-border/60 bg-muted/20 p-4">
+          <SectionTitle icon={ShieldCheck} title="Emergency" />
+          <div className="mt-4 grid gap-3">
+            <DetailItem label="Name" value={request.emergency_contact_name} />
+            <DetailItem label="Relationship" value={request.emergency_contact_relationship} />
+            <DetailItem label="Phone" value={request.emergency_contact_phone} />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-3xl border border-border/60 bg-muted/20 p-4">
+        <SectionTitle icon={FileText} title="Documents" />
+        <div className="mt-4 flex flex-wrap gap-2">
+          {documents.length > 0 ? (
+            documents.map(([label, url]) => (
+              <a
+                key={label}
+                href={url || "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="glass-panel inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-bold"
+              >
+                <FileText className="h-4 w-4" />
+                {label}
+              </a>
+            ))
+          ) : (
+            <span className="text-sm text-muted-foreground">No document links available.</span>
+          )}
+        </div>
+      </div>
+
+      {rejecting && (
+        <div className="mt-5 rounded-3xl border border-destructive/30 bg-destructive/10 p-4">
+          <label className="block space-y-2">
+            <span className="text-sm font-semibold text-destructive">Rejection Reason</span>
+            <textarea
+              className="aqua-input min-h-24 w-full rounded-2xl px-4 py-3 text-sm"
+              value={rejectionReason}
+              onChange={(event) => onRejectionReasonChange(event.target.value)}
+              placeholder="Explain why this Principal registration is rejected."
+            />
+          </label>
+          <div className="mt-3 flex justify-end gap-2">
+            <button
+              type="button"
+              className="glass-panel rounded-2xl px-4 py-2 text-sm font-bold"
+              onClick={() => onRejectingChange(false)}
+              disabled={reviewing}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="aqua-button inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={onReject}
+              disabled={reviewing || !rejectionReason.trim()}
+            >
+              {reviewing ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <XCircle className="h-4 w-4" />
+              )}
+              Confirm Reject
+            </button>
+          </div>
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+function PrincipalActiveCard({
+  principal,
+  schoolName,
+}: {
+  principal: ActivePrincipal | null;
+  schoolName: string;
+}) {
+  if (!principal) {
+    return (
+      <EmptyState
+        icon={ShieldCheck}
+        title="No active Principal"
+        description={`No approved Principal account is connected to ${schoolName} yet.`}
+      />
+    );
+  }
+
+  return (
+    <GlassCard className="rounded-[2rem] p-6">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+        <div className="theme-icon-tile h-16 w-16 rounded-3xl">
+          {principal.avatar_url ? (
+            <img
+              src={principal.avatar_url}
+              alt=""
+              className="h-full w-full rounded-3xl object-cover"
+            />
+          ) : (
+            <UserCheck className="h-7 w-7" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-xl font-bold text-foreground">
+              {principal.full_name || "Active Principal"}
+            </h3>
+            <StatusPill icon={CheckCircle2} label="Active" tone="emerald" />
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">Principal for {schoolName}</p>
+        </div>
+      </div>
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <DetailItem label="Email" value={principal.email} />
+        <DetailItem label="Phone" value={principal.phone} />
+        <DetailItem label="Approved Since" value={formatDashboardDate(principal.created_at)} />
+      </div>
+    </GlassCard>
+  );
+}
+
+function StatusPill({
+  icon: Icon,
+  label,
+  tone,
+}: {
+  icon: LucideIcon;
+  label: string;
+  tone: "amber" | "emerald";
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold",
+        tone === "emerald"
+          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+          : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-200",
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </span>
+  );
+}
+
+function DetailItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div>
+      <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words text-sm font-semibold text-foreground">
+        {value || "No data available"}
+      </p>
+    </div>
+  );
+}
+
+function formatDashboardDate(value?: string | null) {
+  if (!value) return "No data available";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  }).format(date);
+}
+
+function formatYearCount(value?: number | null) {
+  if (value === null || value === undefined) return "No data available";
+  return `${value} ${value === 1 ? "year" : "years"}`;
+}
+
 export function AttendancePage() {
   return (
     <div className="space-y-4">
-      <SectionHeader icon={ClipboardCheck} title="Attendance" description="Today's, weekly, monthly, and class attendance data will be shown here." />
+      <SectionHeader
+        icon={ClipboardCheck}
+        title="Attendance"
+        description="Today's, weekly, monthly, and class attendance data will be shown here."
+      />
       <div className="grid gap-4 lg:grid-cols-4">
         <EmptyPanel icon={CalendarDays} title="Today's Attendance" />
         <EmptyPanel icon={LineChart} title="Weekly" />
@@ -1244,7 +3157,11 @@ export function AttendancePage() {
 export function AcademicPage() {
   return (
     <div className="space-y-4">
-      <SectionHeader icon={BookOpen} title="Academic" description="GPA, pass/fail rate, and subject performance will connect to real academic records later." />
+      <SectionHeader
+        icon={BookOpen}
+        title="Academic"
+        description="GPA, pass/fail rate, and subject performance will connect to real academic records later."
+      />
       <div className="grid gap-4 lg:grid-cols-4">
         <EmptyPanel icon={TrendingUp} title="Overall GPA" />
         <EmptyPanel icon={ShieldCheck} title="Pass Rate" />
@@ -1258,20 +3175,38 @@ export function AcademicPage() {
 export function ReportCardsPage() {
   return (
     <div className="space-y-4">
-      <SectionHeader icon={FileText} title="Report Cards" description="Search, preview, and PDF download UI is ready for backend integration." />
+      <SectionHeader
+        icon={FileText}
+        title="Report Cards"
+        description="Search, preview, and PDF download UI is ready for backend integration."
+      />
       <GlassCard className="rounded-[2rem] p-6">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row">
-          <input className="aqua-input flex-1 rounded-2xl px-4 py-3 text-sm" placeholder="Search Student" disabled />
-          <button className="glass-panel inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold" disabled>
+          <input
+            className="aqua-input flex-1 rounded-2xl px-4 py-3 text-sm"
+            placeholder="Search Student"
+            disabled
+          />
+          <button
+            className="glass-panel inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold"
+            disabled
+          >
             <Search className="h-4 w-4" />
             Preview Report Card
           </button>
-          <button className="aqua-button inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold" disabled>
+          <button
+            className="aqua-button inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold"
+            disabled
+          >
             <Download className="h-4 w-4" />
             Download PDF
           </button>
         </div>
-        <EmptyState icon={FileText} title="No report card data available" description="Student report cards will appear after academic records are connected." />
+        <EmptyState
+          icon={FileText}
+          title="No report card data available"
+          description="Student report cards will appear after academic records are connected."
+        />
       </GlassCard>
     </div>
   );
@@ -1280,7 +3215,11 @@ export function ReportCardsPage() {
 export function ReportsPage() {
   return (
     <div className="space-y-4">
-      <SectionHeader icon={FileBarChart} title="Reports" description="Report generation buttons are UI-only until report services are connected." />
+      <SectionHeader
+        icon={FileBarChart}
+        title="Reports"
+        description="Report generation buttons are UI-only until report services are connected."
+      />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <EmptyPanel icon={ClipboardCheck} title="Attendance Report" />
         <EmptyPanel icon={BookOpen} title="Academic Report" />
@@ -1294,15 +3233,35 @@ export function ReportsPage() {
 export function InstructionsPage() {
   return (
     <div className="space-y-4">
-      <SectionHeader icon={Megaphone} title="Instructions" description="School Admin can send instructions to Principal after backend integration." />
+      <SectionHeader
+        icon={Megaphone}
+        title="Instructions"
+        description="School Admin can send instructions to Principal after backend integration."
+      />
       <GlassCard className="rounded-[2rem] p-6">
         <div className="grid gap-4 md:grid-cols-3">
-          <input className="aqua-input rounded-2xl px-4 py-3 text-sm" placeholder="Instruction" disabled />
-          <input className="aqua-input rounded-2xl px-4 py-3 text-sm" placeholder="Deadline" disabled />
-          <input className="aqua-input rounded-2xl px-4 py-3 text-sm" placeholder="Priority" disabled />
+          <input
+            className="aqua-input rounded-2xl px-4 py-3 text-sm"
+            placeholder="Instruction"
+            disabled
+          />
+          <input
+            className="aqua-input rounded-2xl px-4 py-3 text-sm"
+            placeholder="Deadline"
+            disabled
+          />
+          <input
+            className="aqua-input rounded-2xl px-4 py-3 text-sm"
+            placeholder="Priority"
+            disabled
+          />
         </div>
         <div className="mt-4">
-          <EmptyState icon={ListChecks} title="No instructions available" description="Instruction title, status, completed, pending, and in-progress records are not connected yet." />
+          <EmptyState
+            icon={ListChecks}
+            title="No instructions available"
+            description="Instruction title, status, completed, pending, and in-progress records are not connected yet."
+          />
         </div>
       </GlassCard>
     </div>
@@ -1314,7 +3273,11 @@ export function DocumentsPage() {
 
   return (
     <div className="space-y-4">
-      <SectionHeader icon={Download} title="Documents" description="Approved school documents are shown without fabricated records." />
+      <SectionHeader
+        icon={Download}
+        title="Documents"
+        description="Approved school documents are shown without fabricated records."
+      />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <DocumentCard title="School License" available={Boolean(access.school.document_url)} />
         <DocumentCard title="Building Document" available={false} />
@@ -1328,12 +3291,32 @@ export function DocumentsPage() {
 export function AnalyticsPage() {
   return (
     <div className="space-y-4">
-      <SectionHeader icon={BarChart3} title="Analytics" description="Charts are intentionally empty until real analytics queries are added." />
+      <SectionHeader
+        icon={BarChart3}
+        title="Analytics"
+        description="Charts are intentionally empty until real analytics queries are added."
+      />
       <div className="grid gap-4 xl:grid-cols-2">
-        <ChartEmptyCard icon={LineChart} title="Student Growth" description="No student growth data available." />
-        <ChartEmptyCard icon={ClipboardCheck} title="Attendance Trend" description="No attendance trend data available." />
-        <ChartEmptyCard icon={BookOpen} title="Academic Trend" description="No academic trend data available." />
-        <ChartEmptyCard icon={PieChart} title="Gender Ratio" description="No gender ratio data available." />
+        <ChartEmptyCard
+          icon={LineChart}
+          title="Student Growth"
+          description="No student growth data available."
+        />
+        <ChartEmptyCard
+          icon={ClipboardCheck}
+          title="Attendance Trend"
+          description="No attendance trend data available."
+        />
+        <ChartEmptyCard
+          icon={BookOpen}
+          title="Academic Trend"
+          description="No academic trend data available."
+        />
+        <ChartEmptyCard
+          icon={PieChart}
+          title="Gender Ratio"
+          description="No gender ratio data available."
+        />
       </div>
     </div>
   );
@@ -1342,7 +3325,11 @@ export function AnalyticsPage() {
 export function SettingsPage() {
   return (
     <div className="space-y-4 pb-8">
-      <SectionHeader icon={Settings} title="Settings" description="Settings UI is ready; persistence will be connected to backend later." />
+      <SectionHeader
+        icon={Settings}
+        title="Settings"
+        description="Settings UI is ready; persistence will be connected to backend later."
+      />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <EmptyPanel icon={School} title="School Settings" />
         <EmptyPanel icon={Activity} title="Theme" />
@@ -1353,25 +3340,66 @@ export function SettingsPage() {
   );
 }
 
-function MetricEmptyCard({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  live,
+  error,
+  loading = false,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: number;
+  live: boolean;
+  error?: string;
+  loading?: boolean;
+}) {
   return (
     <GlassCard className="rounded-[2rem] p-5">
       <div className="mb-4 flex items-center justify-between">
         <div className="theme-icon-tile h-12 w-12 rounded-2xl">
           <Icon className="h-5 w-5" />
         </div>
-        <span className="rounded-full border border-border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-          No data
+        <span
+          className={cn(
+            "rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em]",
+            live
+              ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+              : "border-border text-muted-foreground",
+          )}
+          title={error || undefined}
+        >
+          {loading ? "Loading" : live ? "Live" : "No data"}
         </span>
       </div>
       <p className="text-sm font-semibold text-muted-foreground">{label}</p>
-      <p className="mt-2 text-2xl font-bold text-foreground">-</p>
-      <div className="mt-4 h-10 rounded-2xl border border-dashed border-border/70 bg-muted/20" />
+      <p className="mt-2 text-2xl font-bold text-foreground">
+        {loading ? "..." : formatMetricNumber(value)}
+      </p>
+      <div
+        className={cn(
+          "mt-4 h-10 rounded-2xl border bg-muted/20",
+          live ? "border-primary/20" : "border-dashed border-border/70",
+        )}
+      />
     </GlassCard>
   );
 }
 
-function ChartEmptyCard({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description: string }) {
+function formatMetricNumber(value: number) {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+function ChartEmptyCard({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}) {
   return (
     <GlassCard className="rounded-[2rem] p-6">
       <SectionTitle icon={Icon} title={title} />
@@ -1386,12 +3414,110 @@ function ChartEmptyCard({ icon: Icon, title, description }: { icon: LucideIcon; 
   );
 }
 
-function ManagementEmptyCard({ icon: Icon, title }: { icon: LucideIcon; title: string }) {
+function ManagementSummaryCard({
+  icon: Icon,
+  title,
+  value,
+  loading,
+  live,
+  error,
+  emptyDescription,
+}: {
+  icon: LucideIcon;
+  title: string;
+  value: number;
+  loading: boolean;
+  live: boolean;
+  error?: string;
+  emptyDescription: string;
+}) {
   return (
     <GlassCard className="rounded-[2rem] p-6">
-      <SectionTitle icon={Icon} title={title} />
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <SectionTitle icon={Icon} title={title} />
+        <span
+          className={cn(
+            "rounded-full border px-3 py-1 text-xs font-semibold",
+            live
+              ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+              : "border-border text-muted-foreground",
+          )}
+          title={error || undefined}
+        >
+          {loading ? "Loading..." : live ? "Live" : "No data"}
+        </span>
+      </div>
       <div className="mt-4">
-        <EmptyState icon={Icon} title="No data available" description="This section is waiting for real backend records." />
+        {loading ? (
+          <div className="rounded-3xl border border-dashed border-border/70 bg-muted/20 p-8 text-center text-sm text-muted-foreground">
+            Loading...
+          </div>
+        ) : value > 0 ? (
+          <div className="rounded-3xl border border-primary/20 bg-primary/5 p-6">
+            <p className="text-sm font-semibold text-muted-foreground">Current total</p>
+            <p className="mt-2 text-4xl font-bold text-foreground">{formatMetricNumber(value)}</p>
+          </div>
+        ) : (
+          <EmptyState icon={Icon} title="No data available" description={emptyDescription} />
+        )}
+      </div>
+    </GlassCard>
+  );
+}
+
+function RecentNotificationsCard({
+  notifications,
+  loading,
+  error,
+}: {
+  notifications: NotificationPreview[];
+  loading: boolean;
+  error?: string;
+}) {
+  return (
+    <GlassCard className="rounded-[2rem] p-6">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <SectionTitle icon={Bell} title="Recent Notifications" />
+        <span
+          className={cn(
+            "rounded-full border px-3 py-1 text-xs font-semibold",
+            !error && notifications.length > 0
+              ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
+              : "border-border text-muted-foreground",
+          )}
+          title={error || undefined}
+        >
+          {loading ? "Loading..." : !error && notifications.length > 0 ? "Live" : "No data"}
+        </span>
+      </div>
+      <div className="mt-4">
+        {loading ? (
+          <div className="rounded-3xl border border-dashed border-border/70 bg-muted/20 p-8 text-center text-sm text-muted-foreground">
+            Loading...
+          </div>
+        ) : notifications.length > 0 ? (
+          <div className="space-y-3">
+            {notifications.map((notification) => (
+              <div
+                key={notification.id}
+                className="rounded-2xl border border-border/70 bg-muted/20 p-3"
+              >
+                <p className="line-clamp-1 text-sm font-semibold">
+                  {notification.title || "Notification"}
+                </p>
+                <p className="line-clamp-2 text-xs text-muted-foreground">
+                  {notification.message || "-"}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            icon={Bell}
+            title="No data available"
+            description="No recent notifications for this school/admin."
+          />
+        )}
       </div>
     </GlassCard>
   );
@@ -1412,7 +3538,11 @@ function DocumentCard({ title, available }: { title: string; available: boolean 
   return (
     <GlassCard className="rounded-[2rem] p-5">
       <SectionTitle icon={FileText} title={title} />
-      <p className="mt-4 text-sm text-muted-foreground">{available ? "Document path exists in the approved school record." : "No document available"}</p>
+      <p className="mt-4 text-sm text-muted-foreground">
+        {available
+          ? "Document path exists in the approved school record."
+          : "No document available"}
+      </p>
       <div className="mt-4 flex gap-2">
         <button className="glass-panel rounded-xl px-3 py-2 text-xs font-bold" disabled>
           Preview
@@ -1440,9 +3570,19 @@ function ProfileField({
     <label className={cn("block space-y-2", className)}>
       <span className="text-sm font-semibold">{label}</span>
       {multiline ? (
-        <textarea className="aqua-input min-h-24 w-full rounded-2xl px-4 py-3 text-sm" value={value} readOnly placeholder="No data available" />
+        <textarea
+          className="aqua-input min-h-24 w-full rounded-2xl px-4 py-3 text-sm"
+          value={value}
+          readOnly
+          placeholder="No data available"
+        />
       ) : (
-        <input className="aqua-input w-full rounded-2xl px-4 py-3 text-sm" value={value} readOnly placeholder="No data available" />
+        <input
+          className="aqua-input w-full rounded-2xl px-4 py-3 text-sm"
+          value={value}
+          readOnly
+          placeholder="No data available"
+        />
       )}
     </label>
   );
@@ -1483,7 +3623,15 @@ function EditableProfileField({
   );
 }
 
-function SectionHeader({ icon: Icon, title, description }: { icon: LucideIcon; title: string; description: string }) {
+function SectionHeader({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+}) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-start gap-3">
@@ -1508,7 +3656,15 @@ function SectionTitle({ icon: Icon, title }: { icon: LucideIcon; title: string }
   );
 }
 
-function IconButton({ label, icon: Icon, disabled = false }: { label: string; icon: LucideIcon; disabled?: boolean }) {
+function IconButton({
+  label,
+  icon: Icon,
+  disabled = false,
+}: {
+  label: string;
+  icon: LucideIcon;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
