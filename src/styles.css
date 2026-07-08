@@ -185,8 +185,8 @@
     radial-gradient(ellipse at 20% 0%, color-mix(in oklch, white 20%, #bbf1ff 80%), transparent 48%),
     radial-gradient(ellipse at 88% 12%, color-mix(in oklch, white 28%, #d6f7ff 72%), transparent 48%);
   --ambient-light:
-    linear-gradient(115deg, transparent 0 18%, color-mix(in oklch, white 70%, #b9f4ff 30%) 19%, transparent 31%),
-    linear-gradient(76deg, transparent 0 60%, color-mix(in oklch, white 58%, #d7f8ff 42%) 61%, transparent 72%);
+    linear-gradient(115deg, transparent 0, transparent 18%, color-mix(in oklch, white 70%, #b9f4ff 30%) 19%, transparent 31%),
+    linear-gradient(76deg, transparent 0, transparent 60%, color-mix(in oklch, white 58%, #d7f8ff 42%) 61%, transparent 72%);
   --particle-layer:
     radial-gradient(circle at center, color-mix(in oklch, #58bdeb 36%, transparent) 0 1px, transparent 1.4px);
   --particle-opacity: 0.16;
@@ -232,7 +232,7 @@
   --title-gradient: linear-gradient(90deg, #0a72d6, #22acef, #4ec6ff);
   --title-glow: 0 12px 36px color-mix(in oklch, #2ba8ef 28%, transparent);
   --hero-secondary-button-text: #134567;
-  --hero-wave: linear-gradient(100deg, transparent 0 8%, color-mix(in oklch, #8ddfff 22%, transparent) 18%, color-mix(in oklch, #35b8f5 42%, transparent) 48%, color-mix(in oklch, #91e7ff 22%, transparent) 72%, transparent 94%);
+  --hero-wave: linear-gradient(100deg, transparent 0, transparent 8%, color-mix(in oklch, #8ddfff 22%, transparent) 18%, color-mix(in oklch, #35b8f5 42%, transparent) 48%, color-mix(in oklch, #91e7ff 22%, transparent) 72%, transparent 94%);
 }
 
 .dark {
@@ -264,8 +264,8 @@
     radial-gradient(ellipse at 48% 118%, color-mix(in oklch, #00d5ff 20%, transparent), transparent 58%),
     linear-gradient(145deg, #071325, #050d1c 58%, #081a2e);
   --ambient-light:
-    linear-gradient(115deg, transparent 0 18%, color-mix(in oklch, #82f1ff 14%, transparent) 19%, transparent 31%),
-    linear-gradient(76deg, transparent 0 60%, color-mix(in oklch, #4bbcff 12%, transparent) 61%, transparent 72%);
+    linear-gradient(115deg, transparent 0, transparent 18%, color-mix(in oklch, #82f1ff 14%, transparent) 19%, transparent 31%),
+    linear-gradient(76deg, transparent 0, transparent 60%, color-mix(in oklch, #4bbcff 12%, transparent) 61%, transparent 72%);
   --particle-layer:
     radial-gradient(circle at center, color-mix(in oklch, #80ecff 44%, transparent) 0 1px, transparent 1.5px);
   --particle-opacity: 0.30;
@@ -311,7 +311,7 @@
   --title-gradient: linear-gradient(90deg, #c8fbff, #62e7ff, #58a8ff);
   --title-glow: 0 0 24px color-mix(in oklch, #62e7ff 52%, transparent), 0 0 72px color-mix(in oklch, #347cff 28%, transparent);
   --hero-secondary-button-text: #f4fdff;
-  --hero-wave: linear-gradient(100deg, transparent 0 8%, color-mix(in oklch, #62e7ff 18%, transparent) 18%, color-mix(in oklch, #62e7ff 68%, transparent) 48%, color-mix(in oklch, #386fff 34%, transparent) 72%, transparent 94%);
+  --hero-wave: linear-gradient(100deg, transparent 0, transparent 8%, color-mix(in oklch, #62e7ff 18%, transparent) 18%, color-mix(in oklch, #62e7ff 68%, transparent) 48%, color-mix(in oklch, #386fff 34%, transparent) 72%, transparent 94%);
 }
 
 * {
@@ -617,7 +617,7 @@ body::after {
   border-radius: inherit;
   background:
     var(--aqua-highlight),
-    linear-gradient(90deg, transparent 8%, color-mix(in oklch, var(--neon) 20%, transparent), transparent 38% 64%, color-mix(in oklch, var(--electric) 14%, transparent), transparent 92%);
+    linear-gradient(90deg, transparent 8%, color-mix(in oklch, var(--neon) 20%, transparent), transparent 38%, transparent 64%, color-mix(in oklch, var(--electric) 14%, transparent), transparent 92%);
   mix-blend-mode: screen;
 }
 
