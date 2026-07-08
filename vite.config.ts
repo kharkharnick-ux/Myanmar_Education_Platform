@@ -62,8 +62,9 @@ const cleanLogger = {
 };
 
 export default defineConfig({
-  // Local builds are not Lovable deploy builds, so disable Nitro explicitly to avoid noisy skip messages.
-  nitro: false,
+  nitro: {
+    preset: "vercel",
+  },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
