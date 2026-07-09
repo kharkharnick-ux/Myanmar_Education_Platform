@@ -1,5 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type InputHTMLAttributes,
+  type ReactNode,
+} from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -56,7 +63,10 @@ type FormValues = {
   phone: string;
   dateOfBirth: string;
   gender: string;
-  nrcNumber: string;
+  nrcState: string;
+  nrcTownship: string;
+  nrcType: string;
+  nrcNumberRaw: string;
   residentialAddress: string;
   stateRegionId: string;
   townshipId: string;
@@ -88,7 +98,10 @@ const initialFormValues: FormValues = {
   phone: "",
   dateOfBirth: "",
   gender: "",
-  nrcNumber: "",
+  nrcState: "",
+  nrcTownship: "",
+  nrcType: "",
+  nrcNumberRaw: "",
   residentialAddress: "",
   stateRegionId: "",
   townshipId: "",
@@ -123,7 +136,19 @@ const registrationSteps: Array<{ label: string; icon: LucideIcon }> = [
 ];
 const lastRegistrationStepIndex = registrationSteps.length - 1;
 
+const nrcTypeOptions = [
+  { value: "\u1014\u102d\u102f\u1004\u103a", label: "\u1014\u102d\u102f\u1004\u103a" },
+  { value: "\u1027\u100a\u1037\u103a", label: "\u1027\u100a\u1037\u103a" },
+  { value: "\u1015\u103c\u102f", label: "\u1015\u103c\u102f" },
+];
+
 const sanitizeFileName = (name: string) => name.replace(/[^a-zA-Z0-9.\-_]+/g, "-").slice(0, 90);
+const sanitizeMyanmarName = (value: string) =>
+  value.replace(/[^\u1000-\u109f\uaa60-\uaa7f\s]/gu, "");
+const sanitizeEnglishName = (value: string) => value.replace(/[^A-Za-z\s.'-]/g, "");
+const sanitizeNrcNumber = (value: string) => value.replace(/[^0-9\u1040-\u1049]/g, "").slice(0, 6);
+const toEnDigit = (value: string) =>
+  value.replace(/[\u1040-\u1049]/g, (digit) => String(digit.charCodeAt(0) - 0x1040));
 
 export const Route = createFileRoute("/principal/register/form")({
   head: () => ({
@@ -145,6 +170,7 @@ function PrincipalRegisterPage() {
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({});
   const [regions, setRegions] = useState<RegionOption[]>([]);
   const [townships, setTownships] = useState<TownshipOption[]>([]);
+  const [nrcTownships, setNrcTownships] = useState<TownshipOption[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [success, setSuccess] = useState(false);
@@ -203,6 +229,32 @@ function PrincipalRegisterPage() {
       .then(({ data }) => setTownships((data || []) as TownshipOption[]));
   }, [values.stateRegionId]);
 
+  useEffect(() => {
+    if (!values.nrcState) {
+      setNrcTownships([]);
+      setValues((current) =>
+        current.nrcTownship ? { ...current, nrcTownship: "" } : current,
+      );
+      return;
+    }
+
+    supabase
+      .from("townships")
+      .select("id, region_id, name, nrc_code")
+      .eq("region_id", Number(values.nrcState))
+      .order("name")
+      .then(({ data }) => setNrcTownships((data || []) as TownshipOption[]));
+  }, [values.nrcState]);
+
+  const selectedNrcTownship = nrcTownships.find(
+    (township) => township.name === values.nrcTownship,
+  );
+  const nrcTownshipCode = selectedNrcTownship?.nrc_code || values.nrcTownship;
+  const fullNrcNumber =
+    values.nrcState && nrcTownshipCode && values.nrcType && values.nrcNumberRaw
+      ? `${toEnDigit(values.nrcState)}/${nrcTownshipCode}(${values.nrcType})${toEnDigit(values.nrcNumberRaw)}`
+      : "";
+
   const updateValue = (key: keyof FormValues, value: string | boolean) => {
     setValues((current) => ({ ...current, [key]: value }));
   };
@@ -214,7 +266,10 @@ function PrincipalRegisterPage() {
       ["phone", "Phone is required."],
       ["dateOfBirth", "Date of birth is required."],
       ["gender", "Gender is required."],
-      ["nrcNumber", "NRC number is required."],
+      ["nrcState", "NRC state/region is required."],
+      ["nrcTownship", "NRC township is required."],
+      ["nrcType", "NRC type is required."],
+      ["nrcNumberRaw", "NRC number is required."],
       ["residentialAddress", "Residential address is required."],
       ["highestEducation", "Highest education is required."],
       ["major", "Major is required."],
@@ -228,6 +283,9 @@ function PrincipalRegisterPage() {
       if (!String(values[key] || "").trim()) return message;
     }
 
+    if (!selectedNrcTownship) return "Please select a valid NRC township.";
+    if (toEnDigit(values.nrcNumberRaw).length !== 6) return "NRC number must be 6 digits.";
+    if (!fullNrcNumber) return "NRC number is required.";
     if (!files.nrcFront || !files.nrcBack) return "NRC front and back files are required.";
     if (!values.declarationAccepted) return "Please confirm the declaration.";
     return "";
@@ -300,7 +358,7 @@ function PrincipalRegisterPage() {
           phone: values.phone.trim(),
           dateOfBirth: values.dateOfBirth,
           gender: values.gender,
-          nrcNumber: values.nrcNumber.trim(),
+          nrcNumber: fullNrcNumber,
           residentialAddress: values.residentialAddress.trim(),
           stateRegionId: values.stateRegionId ? Number(values.stateRegionId) : null,
           townshipId: values.townshipId ? Number(values.townshipId) : null,
@@ -431,12 +489,12 @@ function PrincipalRegisterPage() {
               <TextInput
                 label="Myanmar name"
                 value={values.fullNameMm}
-                onChange={(value) => updateValue("fullNameMm", value)}
+                onChange={(value) => updateValue("fullNameMm", sanitizeMyanmarName(value))}
               />
               <TextInput
                 label="English name"
                 value={values.fullNameEn}
-                onChange={(value) => updateValue("fullNameEn", value)}
+                onChange={(value) => updateValue("fullNameEn", sanitizeEnglishName(value))}
               />
               <TextInput label="Email address" value={invite.request.email} readOnly />
               <TextInput
@@ -456,11 +514,54 @@ function PrincipalRegisterPage() {
                 onChange={(value) => updateValue("gender", value)}
                 options={["Male", "Female", "Other"]}
               />
-              <TextInput
-                label="NRC number"
-                value={values.nrcNumber}
-                onChange={(value) => updateValue("nrcNumber", value)}
+              <InfoBox icon={Info} title="NRC information" className="md:col-span-2">
+                Select the NRC state and township from the database, then enter only the last 6
+                digits.
+              </InfoBox>
+              <SelectInput
+                label="NRC State/Region"
+                value={values.nrcState}
+                onChange={(value) => {
+                  updateValue("nrcState", value);
+                  updateValue("nrcTownship", "");
+                }}
+                options={regions.map((region) => ({
+                  value: String(region.id),
+                  label: region.name,
+                }))}
               />
+              <SelectInput
+                label="NRC Township"
+                value={values.nrcTownship}
+                onChange={(value) => updateValue("nrcTownship", value)}
+                disabled={!values.nrcState}
+                options={nrcTownships.map((township) => ({
+                  value: township.name,
+                  label: `${township.name}${township.nrc_code ? ` (${township.nrc_code})` : ""}`,
+                }))}
+              />
+              <SelectInput
+                label="NRC Type"
+                value={values.nrcType}
+                onChange={(value) => updateValue("nrcType", value)}
+                options={nrcTypeOptions}
+              />
+              <TextInput
+                label="NRC last 6 digits"
+                value={values.nrcNumberRaw}
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="123456"
+                onChange={(value) => updateValue("nrcNumberRaw", sanitizeNrcNumber(value))}
+              />
+              <div className="glass-panel flex items-center justify-between gap-3 rounded-2xl border-primary/10 p-3 md:col-span-2">
+                <span className="ml-1 text-xs font-semibold text-muted-foreground">
+                  NRC Preview
+                </span>
+                <span className="rounded-xl bg-primary/10 px-3 py-1.5 text-sm font-bold tracking-widest text-primary">
+                  {fullNrcNumber || "Select NRC details"}
+                </span>
+              </div>
               <SelectInput
                 label="State/Region"
                 value={values.stateRegionId}
@@ -724,12 +825,18 @@ function TextInput({
   onChange,
   type = "text",
   readOnly = false,
+  inputMode,
+  maxLength,
+  placeholder,
 }: {
   label: string;
   value: string;
   onChange?: (value: string) => void;
   type?: string;
   readOnly?: boolean;
+  inputMode?: InputHTMLAttributes<HTMLInputElement>["inputMode"];
+  maxLength?: number;
+  placeholder?: string;
 }) {
   return (
     <label className="space-y-2">
@@ -738,6 +845,9 @@ function TextInput({
         type={type}
         value={value}
         readOnly={readOnly}
+        inputMode={inputMode}
+        maxLength={maxLength}
+        placeholder={placeholder}
         onChange={(event) => onChange?.(event.target.value)}
         className={cn(
           "aqua-input w-full rounded-2xl px-4 py-3.5 text-sm outline-none transition-all focus:ring-2 ring-primary/20",
