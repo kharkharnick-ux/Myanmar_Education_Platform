@@ -55,6 +55,11 @@ const passwordSetupLinkRequestSchema = z.object({
   nrcLast6: z.string().regex(/^[0-9]{6}$/),
 });
 
+const applicationStatusCheckSchema = z.object({
+  email: z.string().email(),
+  nrcLast6: z.string().regex(/^[0-9]{6}$/),
+});
+
 type RegistrationRequestRow = {
   id: string;
   status: "pending" | "approved" | "rejected";
@@ -71,7 +76,7 @@ type RegistrationRequestRow = {
   township_id: number | null;
   nrc_front_url: string | null;
   nrc_back_url: string | null;
-  school_name: string;
+  school_name: string | null;
   school_type: string;
   grade_from: string | null;
   grade_to: string | null;
@@ -87,6 +92,9 @@ type RegistrationRequestRow = {
   reviewed_by?: string | null;
   approved_profile_id?: string | null;
   approved_school_id?: string | null;
+  created_at?: string | null;
+  reviewed_at?: string | null;
+  rejection_reason?: string | null;
 };
 
 type AuthUserRecord = {
@@ -584,6 +592,69 @@ export const requestSchoolAdminPasswordSetupLink = createServerFn({ method: "POS
       ok: true,
       email: normalizedEmail,
       message: "Password setup link အသစ်ကို သင့် email သို့ ပေးပို့ထားပါသည်။",
+    };
+  });
+
+export const checkRegistrationApplicationStatus = createServerFn({ method: "POST" })
+  .validator(applicationStatusCheckSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const normalizedEmail = normalizeEmail(data.email);
+
+    const { data: requests, error: requestError } = await supabaseAdmin
+      .from("registration_requests")
+      .select(
+        "id, request_type, status, full_name_mm, email, nrc_number, school_name, approved_school_id, rejection_reason, created_at, reviewed_at",
+      )
+      .in("request_type", ["school_admin", "principal"])
+      .in("status", ["pending", "approved", "rejected"])
+      .eq("email", normalizedEmail)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (requestError) throw requestError;
+
+    const matchedRequests = ((requests || []) as RegistrationRequestRow[]).filter(
+      (request) => extractLast6Digits(request.nrc_number) === data.nrcLast6,
+    );
+
+    const schoolIds = Array.from(
+      new Set(
+        matchedRequests
+          .map((request) => request.approved_school_id)
+          .filter((schoolId): schoolId is string => Boolean(schoolId)),
+      ),
+    );
+
+    const schoolNameById = new Map<string, string>();
+    if (schoolIds.length > 0) {
+      const { data: schools, error: schoolError } = await supabaseAdmin
+        .from("schools")
+        .select("id, school_name")
+        .in("id", schoolIds);
+
+      if (schoolError) throw schoolError;
+
+      for (const school of (schools || []) as Array<{ id: string; school_name: string | null }>) {
+        if (school.school_name) schoolNameById.set(school.id, school.school_name);
+      }
+    }
+
+    return {
+      ok: true,
+      applications: matchedRequests.map((request) => ({
+        id: request.id,
+        requestType: request.request_type,
+        fullNameMm: request.full_name_mm || null,
+        schoolName:
+          request.school_name ||
+          (request.approved_school_id ? schoolNameById.get(request.approved_school_id) : null) ||
+          null,
+        status: request.status,
+        rejectionReason: request.rejection_reason || null,
+        createdAt: request.created_at || null,
+        reviewedAt: request.reviewed_at || null,
+      })),
     };
   });
 

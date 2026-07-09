@@ -1761,6 +1761,8 @@ type PrincipalRegistrationRequest = {
   gender: string | null;
   nrc_number: string | null;
   residential_address: string | null;
+  state_region_id: number | null;
+  township_id: number | null;
   nrc_front_url: string | null;
   nrc_back_url: string | null;
   status: PrincipalRequestStatus;
@@ -1821,6 +1823,8 @@ const principalRegistrationRequestSelect = [
   "gender",
   "nrc_number",
   "residential_address",
+  "state_region_id",
+  "township_id",
   "nrc_front_url",
   "nrc_back_url",
   "status",
@@ -1881,6 +1885,16 @@ type PrincipalSelfFileKey =
 
 type RegionOption = { id: number; name: string };
 type TownshipOption = { id: number; region_id: number; name: string };
+type PrincipalDocumentBucket = "application-nrc-docs" | "application-school-docs";
+
+type PrincipalUploadedDocument = {
+  label: string;
+  bucket: PrincipalDocumentBucket;
+  path: string | null;
+  buttonLabel: string;
+  required?: boolean;
+  optional?: boolean;
+};
 
 const principalSelfFileLabels: Record<PrincipalSelfFileKey, string> = {
   profilePhoto: "Profile photo",
@@ -1949,10 +1963,19 @@ export function PrincipalManagementPage() {
   const [selfFiles, setSelfFiles] = useState<Partial<Record<PrincipalSelfFileKey, File>>>({});
   const [regions, setRegions] = useState<RegionOption[]>([]);
   const [townships, setTownships] = useState<TownshipOption[]>([]);
+  const [allTownships, setAllTownships] = useState<TownshipOption[]>([]);
   const [selfSubmitting, setSelfSubmitting] = useState(false);
 
   const invitedRequests = requests.filter((request) => request.status === "invited");
   const pendingRequests = requests.filter((request) => request.status === "pending");
+  const regionNameById = useMemo(
+    () => new Map(regions.map((region) => [region.id, region.name])),
+    [regions],
+  );
+  const townshipNameById = useMemo(
+    () => new Map(allTownships.map((township) => [township.id, township.name])),
+    [allTownships],
+  );
 
   const loadPrincipalData = async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -2039,6 +2062,12 @@ export function PrincipalManagementPage() {
       .select("id, name")
       .order("name")
       .then(({ data }) => setRegions((data || []) as RegionOption[]));
+
+    supabase
+      .from("townships")
+      .select("id, region_id, name")
+      .order("name")
+      .then(({ data }) => setAllTownships((data || []) as TownshipOption[]));
   }, []);
 
   useEffect(() => {
@@ -2115,6 +2144,25 @@ export function PrincipalManagementPage() {
       console.error("[Principal invite UI] Unable to copy manual invite link", error);
       setErrorMessage("Unable to copy the Principal invite link.");
     }
+  };
+
+  const openPrincipalDocument = async (document: PrincipalUploadedDocument) => {
+    if (!document.path) return;
+
+    setErrorMessage("");
+
+    const { data, error } = await supabase.storage
+      .from(document.bucket)
+      .createSignedUrl(document.path, 60 * 5);
+
+    if (error || !data?.signedUrl) {
+      setErrorMessage(
+        error?.message || `${document.label} file ကို ဖွင့်၍မရပါ။ Storage permission ကို စစ်ဆေးပါ။`,
+      );
+      return;
+    }
+
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
   const updateSelfForm = (key: keyof PrincipalSelfFormValues, value: string | boolean) => {
@@ -2392,42 +2440,41 @@ export function PrincipalManagementPage() {
         )}
       </GlassCard>
 
-      {principalMode &&
-        <>
-          <div className="glass-panel flex flex-col gap-2 rounded-3xl p-2 sm:flex-row">
-            {tabs.map((item) => (
-              <button
-                key={item.key}
-                type="button"
+      <>
+        <div className="glass-panel flex flex-col gap-2 rounded-3xl p-2 sm:flex-row">
+          {tabs.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={cn(
+                "inline-flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold transition",
+                tab === item.key
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+              )}
+              onClick={() => setTab(item.key)}
+            >
+              <item.icon className="h-4 w-4" />
+              <span>{item.label}</span>
+              <span
                 className={cn(
-                  "inline-flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold transition",
-                  tab === item.key
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+                  "rounded-full px-2 py-0.5 text-xs",
+                  tab === item.key ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
                 )}
-                onClick={() => setTab(item.key)}
               >
-                <item.icon className="h-4 w-4" />
-                <span>{item.label}</span>
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-0.5 text-xs",
-                    tab === item.key ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {item.count}
-                </span>
-              </button>
-            ))}
-          </div>
+                {item.count}
+              </span>
+            </button>
+          ))}
+        </div>
 
-          {loading ? (
-            <GlassCard className="rounded-[2rem] p-8 text-center text-sm text-muted-foreground">
-              <Loader2 className="mx-auto mb-3 h-6 w-6 animate-spin text-primary" />
-              Loading Principal data...
-            </GlassCard>
-          ) : (
-            <>
+        {loading ? (
+          <GlassCard className="rounded-[2rem] p-8 text-center text-sm text-muted-foreground">
+            <Loader2 className="mx-auto mb-3 h-6 w-6 animate-spin text-primary" />
+            Loading Principal data...
+          </GlassCard>
+        ) : (
+          <>
           {tab === "invited" && (
             <div className="grid gap-4 xl:grid-cols-2">
               {invitedRequests.length > 0 ? (
@@ -2451,6 +2498,21 @@ export function PrincipalManagementPage() {
                   <PrincipalReviewCard
                     key={request.id}
                     request={request}
+                    schoolName={access.school.school_name}
+                    schoolType={access.school.school_type}
+                    schoolAddress={access.school.address}
+                    regionName={
+                      request.state_region_id
+                        ? regionNameById.get(request.state_region_id) ||
+                          String(request.state_region_id)
+                        : null
+                    }
+                    townshipName={
+                      request.township_id
+                        ? townshipNameById.get(request.township_id) ||
+                          String(request.township_id)
+                        : null
+                    }
                     reviewing={reviewingId === request.id}
                     rejecting={rejectingId === request.id}
                     rejectionReason={rejectionReason}
@@ -2461,6 +2523,7 @@ export function PrincipalManagementPage() {
                     onRejectionReasonChange={setRejectionReason}
                     onApprove={() => reviewRequest(request.id, "approved")}
                     onReject={() => reviewRequest(request.id, "rejected")}
+                    onOpenDocument={openPrincipalDocument}
                   />
                 ))
               ) : (
@@ -2479,10 +2542,9 @@ export function PrincipalManagementPage() {
               schoolName={access.school.school_name}
             />
           )}
-            </>
-          )}
-        </>
-      }
+          </>
+        )}
+      </>
     </div>
   );
 }
@@ -2861,8 +2923,73 @@ function PrincipalInviteCard({ request }: { request: PrincipalRegistrationReques
   );
 }
 
+const getPrincipalUploadedDocuments = (
+  request: PrincipalRegistrationRequest,
+): PrincipalUploadedDocument[] => [
+  {
+    label: "Profile ဓာတ်ပုံ",
+    bucket: "application-nrc-docs",
+    path: request.profile_photo_url,
+    buttonLabel: "View",
+  },
+  {
+    label: "NRC ရှေ့ဘက်",
+    bucket: "application-nrc-docs",
+    path: request.nrc_front_url,
+    buttonLabel: "View",
+    required: true,
+  },
+  {
+    label: "NRC နောက်ဘက်",
+    bucket: "application-nrc-docs",
+    path: request.nrc_back_url,
+    buttonLabel: "View",
+    required: true,
+  },
+  {
+    label: "ပညာအရည်အချင်းလက်မှတ်",
+    bucket: "application-school-docs",
+    path: request.degree_certificate_url,
+    buttonLabel: "Open PDF",
+    required: true,
+  },
+  {
+    label: "သင်ကြားခွင့် / လုပ်ငန်းလိုင်စင်လက်မှတ်",
+    bucket: "application-school-docs",
+    path: request.teaching_license_url,
+    buttonLabel: "Open PDF",
+    required: true,
+  },
+  {
+    label: "Appointment Letter",
+    bucket: "application-school-docs",
+    path: request.appointment_letter_url,
+    buttonLabel: "Open PDF",
+    optional: true,
+  },
+  {
+    label: "Resume",
+    bucket: "application-school-docs",
+    path: request.resume_url,
+    buttonLabel: "Open PDF",
+    optional: true,
+  },
+  {
+    label: "Recommendation Letter",
+    bucket: "application-school-docs",
+    path: request.recommendation_letter_url,
+    buttonLabel: "Open PDF",
+    optional: true,
+  },
+].filter((document) => !document.optional || Boolean(document.path));
+
 function PrincipalReviewCard({
   request,
+  schoolName,
+  schoolType,
+  schoolAddress,
+  regionName,
+  townshipName,
   reviewing,
   rejecting,
   rejectionReason,
@@ -2870,8 +2997,14 @@ function PrincipalReviewCard({
   onRejectionReasonChange,
   onApprove,
   onReject,
+  onOpenDocument,
 }: {
   request: PrincipalRegistrationRequest;
+  schoolName: string;
+  schoolType: string;
+  schoolAddress: string | null;
+  regionName: string | null;
+  townshipName: string | null;
   reviewing: boolean;
   rejecting: boolean;
   rejectionReason: string;
@@ -2879,16 +3012,14 @@ function PrincipalReviewCard({
   onRejectionReasonChange: (value: string) => void;
   onApprove: () => void;
   onReject: () => void;
+  onOpenDocument: (document: PrincipalUploadedDocument) => void;
 }) {
-  const documents = [
-    ["NRC Front", request.nrc_front_url],
-    ["NRC Back", request.nrc_back_url],
-    ["Degree Certificate", request.degree_certificate_url],
-    ["Teaching License", request.teaching_license_url],
-    ["Appointment Letter", request.appointment_letter_url],
-    ["Resume", request.resume_url],
-    ["Recommendation Letter", request.recommendation_letter_url],
-  ].filter(([, url]) => Boolean(url));
+  const documents = getPrincipalUploadedDocuments(request);
+  const hasEmergencyContact = Boolean(
+    request.emergency_contact_name ||
+      request.emergency_contact_relationship ||
+      request.emergency_contact_phone,
+  );
 
   return (
     <GlassCard className="rounded-[2rem] p-6">
@@ -2904,6 +3035,11 @@ function PrincipalReviewCard({
           <p className="mt-2 text-sm text-muted-foreground">
             Submitted {formatDashboardDate(request.updated_at || request.created_at)}
           </p>
+          {request.invite_note && (
+            <p className="mt-3 max-w-2xl rounded-2xl border border-border/60 bg-muted/20 p-3 text-sm leading-6 text-muted-foreground">
+              {request.invite_note}
+            </p>
+          )}
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <button
@@ -2931,25 +3067,29 @@ function PrincipalReviewCard({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+      <div className="mt-5 grid gap-4 xl:grid-cols-3">
         <div className="rounded-3xl border border-border/60 bg-muted/20 p-4">
-          <SectionTitle icon={UserCheck} title="Personal" />
+          <SectionTitle icon={UserCheck} title="ကိုယ်ရေးအချက်အလက်" />
           <div className="mt-4 grid gap-3">
+            <DetailItem label="မြန်မာအမည်" value={request.full_name_mm} />
+            <DetailItem label="English Name" value={request.full_name_en} />
             <DetailItem label="Email" value={request.email} />
             <DetailItem label="Phone" value={request.phone} />
-            <DetailItem label="English Name" value={request.full_name_en} />
             <DetailItem label="Date of Birth" value={formatDashboardDate(request.date_of_birth)} />
             <DetailItem label="Gender" value={request.gender} />
             <DetailItem label="NRC" value={request.nrc_number} />
+            <DetailItem
+              label="Region / Township"
+              value={`${regionName || "No data available"} / ${townshipName || "No data available"}`}
+            />
             <DetailItem label="Address" value={request.residential_address} />
           </div>
         </div>
 
         <div className="rounded-3xl border border-border/60 bg-muted/20 p-4">
-          <SectionTitle icon={GraduationCap} title="Professional" />
+          <SectionTitle icon={GraduationCap} title="ပညာအရည်အချင်းနှင့် အတွေ့အကြုံ" />
           <div className="mt-4 grid gap-3">
             <DetailItem label="Highest Education" value={request.highest_education} />
-            <DetailItem label="Major" value={request.major} />
             <DetailItem
               label="Teaching Experience"
               value={formatYearCount(request.years_of_teaching_experience)}
@@ -2959,39 +3099,82 @@ function PrincipalReviewCard({
               value={formatYearCount(request.years_of_management_experience)}
             />
             <DetailItem label="Previous School" value={request.previous_school} />
-            <DetailItem label="Current Position" value={request.current_position} />
+            {request.major && <DetailItem label="Major" value={request.major} />}
+            {request.current_position && (
+              <DetailItem label="Current Position" value={request.current_position} />
+            )}
           </div>
         </div>
 
         <div className="rounded-3xl border border-border/60 bg-muted/20 p-4">
-          <SectionTitle icon={ShieldCheck} title="Emergency" />
+          <SectionTitle icon={School} title="School Assignment" />
           <div className="mt-4 grid gap-3">
+            <DetailItem label="School Name" value={schoolName} />
+            <DetailItem label="School Type" value={schoolType} />
+            <DetailItem label="School Address" value={schoolAddress} />
+            <DetailItem label="Review Status" value="Waiting for School Admin approval" />
+          </div>
+        </div>
+      </div>
+
+      {hasEmergencyContact && (
+        <div className="mt-5 rounded-3xl border border-border/60 bg-muted/20 p-4">
+          <SectionTitle icon={ShieldCheck} title="Emergency Contact" />
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
             <DetailItem label="Name" value={request.emergency_contact_name} />
             <DetailItem label="Relationship" value={request.emergency_contact_relationship} />
             <DetailItem label="Phone" value={request.emergency_contact_phone} />
           </div>
         </div>
-      </div>
+      )}
 
       <div className="mt-5 rounded-3xl border border-border/60 bg-muted/20 p-4">
-        <SectionTitle icon={FileText} title="Documents" />
-        <div className="mt-4 flex flex-wrap gap-2">
-          {documents.length > 0 ? (
-            documents.map(([label, url]) => (
-              <a
-                key={label}
-                href={url || "#"}
-                target="_blank"
-                rel="noreferrer"
-                className="glass-panel inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-bold"
-              >
-                <FileText className="h-4 w-4" />
-                {label}
-              </a>
-            ))
-          ) : (
-            <span className="text-sm text-muted-foreground">No document links available.</span>
-          )}
+        <SectionTitle icon={FileText} title="စာရွက်စာတမ်းများ" />
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {documents.map((document) => (
+            <div
+              key={document.label}
+              className="rounded-2xl border border-border/50 bg-background/25 p-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold text-muted-foreground">
+                    {document.required ? "Required Document" : "Optional Document"}
+                  </p>
+                  <p className="mt-1 text-sm font-bold leading-6">{document.label}</p>
+                </div>
+                {document.required && (
+                  <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-bold text-primary">
+                    Required
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-3">
+                {document.path ? (
+                  <button
+                    type="button"
+                    className="glass-panel inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-primary transition hover:glow-ring"
+                    onClick={() => onOpenDocument(document)}
+                  >
+                    <Eye className="h-4 w-4" />
+                    {document.buttonLabel}
+                  </button>
+                ) : (
+                  <span
+                    className={cn(
+                      "inline-flex rounded-xl px-3 py-2 text-xs font-bold",
+                      document.required
+                        ? "bg-destructive/10 text-destructive"
+                        : "bg-muted/40 text-muted-foreground",
+                    )}
+                  >
+                    {document.required ? "Missing" : "မတင်ထားပါ"}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

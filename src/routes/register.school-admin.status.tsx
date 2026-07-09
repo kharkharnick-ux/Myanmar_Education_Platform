@@ -1,19 +1,20 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, Loader2, Search, ShieldCheck } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { checkRegistrationApplicationStatus } from "@/lib/api/school-admin-account.functions";
 import { cn } from "@/lib/utils";
 
 type ApplicationStatus = "pending" | "approved" | "rejected";
 
 type ApplicationStatusRow = {
   id: string;
-  full_name_mm: string | null;
-  school_name: string | null;
+  requestType: string;
+  fullNameMm: string | null;
+  schoolName: string | null;
   status: ApplicationStatus;
-  rejection_reason: string | null;
-  created_at: string | null;
-  reviewed_at: string | null;
+  rejectionReason: string | null;
+  createdAt: string | null;
+  reviewedAt: string | null;
 };
 
 const myanmarDigits = "၀၁၂၃၄၅၆၇၈၉";
@@ -26,7 +27,7 @@ const sanitizeNrcLast6 = (value: string) =>
 
 export const Route = createFileRoute("/register/school-admin/status")({
   head: () => ({
-    meta: [{ title: "ကျောင်းလျှောက်ထားချက်များ — Myanmar EDU" }],
+    meta: [{ title: "လျှောက်ထားမှုအခြေအနေ — Myanmar EDU" }],
   }),
   component: SchoolAdminApplicationStatusPage,
 });
@@ -60,20 +61,17 @@ function SchoolAdminApplicationStatusPage() {
 
     setLoading(true);
     try {
-      const { data, error: rpcError } = await supabase.rpc(
-        "check_school_admin_application_status" as never,
-        {
-          input_email: normalizedEmail,
-          input_nrc_last6: normalizedNrcLast6,
-        } as never,
-      );
+      const result = await checkRegistrationApplicationStatus({
+        data: {
+          email: normalizedEmail,
+          nrcLast6: normalizedNrcLast6,
+        },
+      });
 
-      if (rpcError) throw rpcError;
-
-      setApplications((data || []) as ApplicationStatusRow[]);
+      setApplications(result.applications as ApplicationStatusRow[]);
       setSearched(true);
     } catch (err) {
-      console.error("School admin application status check failed:", err);
+      console.error("Registration status check failed:", err);
       setError("လျှောက်ထားချက်အခြေအနေ စစ်ဆေး၍မရသေးပါ။ နောက်မှထပ်ကြိုးစားပေးပါ။");
     } finally {
       setLoading(false);
@@ -96,9 +94,11 @@ function SchoolAdminApplicationStatusPage() {
             <div className="theme-icon-tile-strong mx-auto mb-4 h-14 w-14 rounded-2xl">
               <ShieldCheck className="h-7 w-7" />
             </div>
-            <h1 className="text-2xl font-bold glow-text sm:text-3xl">ကျောင်းလျှောက်ထားချက်များ</h1>
+            <h1 className="text-2xl font-bold glow-text sm:text-3xl">
+              လျှောက်ထားမှုအခြေအနေစစ်ရန်
+            </h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Email နှင့် NRC နောက်ဆုံးဂဏန်း ၆ လုံးဖြင့် သင့်လျှောက်ထားချက်အခြေအနေကို စစ်ဆေးနိုင်ပါသည်။
+              School Admin application နှင့် Principal registration အခြေအနေကို Email နှင့် NRC နောက်ဆုံးဂဏန်း ၆ လုံးဖြင့် စစ်ဆေးနိုင်ပါသည်။
             </p>
           </div>
 
@@ -146,7 +146,7 @@ function SchoolAdminApplicationStatusPage() {
 
         {searched && applications.length === 0 && (
           <div className="glass-panel rounded-3xl p-6 text-center text-sm font-semibold text-muted-foreground">
-            ဤ Email နှင့် NRC နံပါတ်ဖြင့် လျှောက်ထားချက် မရှိသေးပါ။
+            ဤ Email နှင့် NRC နံပါတ်ဖြင့် School Admin application သို့မဟုတ် Principal registration မရှိသေးပါ။
           </div>
         )}
 
@@ -163,33 +163,44 @@ function SchoolAdminApplicationStatusPage() {
 }
 
 function ApplicationCard({ application }: { application: ApplicationStatusRow }) {
+  const isPrincipal = application.requestType === "principal";
+  const typeLabel = isPrincipal ? "Principal registration" : "School Admin application";
   const statusMessage =
     application.status === "approved"
-      ? "သင့်လျှောက်ထားချက် အတည်ပြုပြီးပါပြီ။ Password သတ်မှတ်ရန် email တွင် link ပို့ပေးထားပါသည်။ Password သတ်မှတ်ပြီးပါက သင့် email နှင့် password ဖြင့် login ဝင်နိုင်ပါသည်။"
+      ? isPrincipal
+        ? "သင့် Principal registration အတည်ပြုပြီးပါပြီ။ Password သတ်မှတ်ရန် email တွင် link ပို့ပေးထားပါသည်။ Password သတ်မှတ်ပြီးပါက သင့် email နှင့် password ဖြင့် login ဝင်နိုင်ပါသည်။"
+        : "သင့် School Admin application အတည်ပြုပြီးပါပြီ။ Password သတ်မှတ်ရန် email တွင် link ပို့ပေးထားပါသည်။ Password သတ်မှတ်ပြီးပါက သင့် email နှင့် password ဖြင့် login ဝင်နိုင်ပါသည်။"
       : application.status === "rejected"
-        ? "သင့်လျှောက်ထားချက်ကို ငြင်းပယ်ထားပါသည်။"
-        : "သင့်လျှောက်ထားချက်ကို စစ်ဆေးနေဆဲဖြစ်ပါသည်။ Super Admin အတည်ပြုပြီးပါက သင့် email သို့ password သတ်မှတ်ရန် link ပေးပို့ပါမည်။";
+        ? isPrincipal
+          ? "သင့် Principal registration ကို ငြင်းပယ်ထားပါသည်။"
+          : "သင့် School Admin application ကို ငြင်းပယ်ထားပါသည်။"
+        : isPrincipal
+          ? "သင့် Principal registration ကို School Admin မှ စစ်ဆေးနေဆဲဖြစ်ပါသည်။ အတည်ပြုပြီးပါက သင့် email သို့ password သတ်မှတ်ရန် link ပေးပို့ပါမည်။"
+          : "သင့် School Admin application ကို Super Admin မှ စစ်ဆေးနေဆဲဖြစ်ပါသည်။ အတည်ပြုပြီးပါက သင့် email သို့ password သတ်မှတ်ရန် link ပေးပို့ပါမည်။";
 
   return (
     <article className="aqua-card space-y-4 p-5 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-xl font-bold text-foreground">{application.school_name || "-"}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{application.full_name_mm || "-"}</p>
+          <p className="mb-1 text-xs font-bold uppercase tracking-[0.18em] text-primary">
+            {typeLabel}
+          </p>
+          <h2 className="text-xl font-bold text-foreground">{application.schoolName || "-"}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{application.fullNameMm || "-"}</p>
         </div>
         <StatusBadge status={application.status} />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <InfoItem label="Submitted Date" value={formatDate(application.created_at)} />
-        <InfoItem label="Reviewed Date" value={formatDate(application.reviewed_at)} />
+        <InfoItem label="Submitted Date" value={formatDate(application.createdAt)} />
+        <InfoItem label="Reviewed Date" value={formatDate(application.reviewedAt)} />
       </div>
 
       <div className="glass-panel rounded-2xl p-4 text-sm leading-7 text-foreground">{statusMessage}</div>
 
-      {application.status === "rejected" && application.rejection_reason && (
+      {application.status === "rejected" && application.rejectionReason && (
         <div className="rounded-2xl border border-destructive/35 bg-destructive/10 p-4 text-sm leading-7 text-destructive">
-          {application.rejection_reason}
+          {application.rejectionReason}
         </div>
       )}
     </article>

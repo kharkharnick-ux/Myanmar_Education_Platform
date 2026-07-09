@@ -81,7 +81,7 @@ export function Hero() {
               to="/register/school-admin/status"
               className="landing-secondary-action glass-panel inline-flex items-center justify-center rounded-2xl px-7 py-4 text-sm font-bold transition hover:bg-accent/35 hover:glow-ring"
             >
-              ကျောင်းလျှောက်ထားချက်များ
+              လျှောက်ထားမှုအခြေအနေစစ်ရန်
             </Link>
           </div>
         </div>

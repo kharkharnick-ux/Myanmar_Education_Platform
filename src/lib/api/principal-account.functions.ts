@@ -11,6 +11,17 @@ const tokenSchema = z.object({
   token: z.string().min(16),
 });
 
+const principalRegistrationUploadFileSchema = z.object({
+  key: z.enum(["profilePhoto", "nrcFront", "nrcBack", "degreeCertificate", "teachingLicense"]),
+  fileName: z.string().min(1).max(180),
+  contentType: z.string().optional(),
+});
+
+const createPrincipalRegistrationUploadUrlsSchema = z.object({
+  token: z.string().min(16),
+  files: z.array(principalRegistrationUploadFileSchema).min(1).max(5),
+});
+
 const submitPrincipalRegistrationSchema = z.object({
   token: z.string().min(16),
   fullNameMm: z.string().min(1),
@@ -24,21 +35,21 @@ const submitPrincipalRegistrationSchema = z.object({
   townshipId: z.number().int().nullable(),
   profilePhotoUrl: z.string().nullable(),
   highestEducation: z.string().min(1),
-  major: z.string().min(1),
+  major: z.string(),
   yearsOfTeachingExperience: z.number().int().min(0),
   yearsOfManagementExperience: z.number().int().min(0),
   previousSchool: z.string().nullable(),
-  currentPosition: z.string().min(1),
+  currentPosition: z.string(),
   nrcFrontUrl: z.string().min(1),
   nrcBackUrl: z.string().min(1),
-  degreeCertificateUrl: z.string().nullable(),
-  teachingLicenseUrl: z.string().nullable(),
+  degreeCertificateUrl: z.string().min(1),
+  teachingLicenseUrl: z.string().min(1),
   appointmentLetterUrl: z.string().nullable(),
   resumeUrl: z.string().nullable(),
   recommendationLetterUrl: z.string().nullable(),
-  emergencyContactName: z.string().min(1),
-  emergencyContactRelationship: z.string().min(1),
-  emergencyContactPhone: z.string().min(1),
+  emergencyContactName: z.string(),
+  emergencyContactRelationship: z.string(),
+  emergencyContactPhone: z.string(),
   declarationAccepted: z.literal(true),
 });
 
@@ -119,6 +130,32 @@ type PrincipalRequestRow = {
 };
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const sanitizePrincipalUploadFileName = (name: string) =>
+  name.replace(/[^a-zA-Z0-9.\-_]+/g, "-").slice(0, 90) || "upload";
+
+const principalUploadBucketByKey = {
+  profilePhoto: "application-nrc-docs",
+  nrcFront: "application-nrc-docs",
+  nrcBack: "application-nrc-docs",
+  degreeCertificate: "application-school-docs",
+  teachingLicense: "application-school-docs",
+} as const;
+
+const principalPdfUploadKeys = new Set(["degreeCertificate", "teachingLicense"]);
+
+const getPrincipalUploadFileName = (
+  key: keyof typeof principalUploadBucketByKey,
+  fileName: string,
+) => {
+  const sanitizedName = sanitizePrincipalUploadFileName(fileName);
+  if (!principalPdfUploadKeys.has(key)) return sanitizedName;
+
+  const withoutExtension = sanitizedName.replace(/\.[^/.]+$/, "") || key;
+  return `${withoutExtension}.pdf`;
+};
+
+const isPrincipalPdfUpload = (fileName: string, contentType?: string) =>
+  contentType === "application/pdf" || fileName.toLowerCase().endsWith(".pdf");
 
 const getRedactedKeyPrefix = (value?: string | null) => {
   const trimmed = value?.trim();
@@ -939,6 +976,58 @@ export const getPrincipalInvite = createServerFn({ method: "POST" })
         note: principalRequest.invite_note || "",
       },
       school: toPublicSchool(school as SchoolRow),
+    };
+  });
+
+export const createPrincipalRegistrationUploadUrls = createServerFn({ method: "POST" })
+  .validator(createPrincipalRegistrationUploadUrlsSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const invite = await fetchValidPrincipalInvite(supabaseAdmin, data.token);
+    const stamp = Date.now();
+
+    const signedUploads = await Promise.all(
+      data.files.map(async (file) => {
+        const bucket = principalUploadBucketByKey[file.key];
+
+        if (principalPdfUploadKeys.has(file.key) && !isPrincipalPdfUpload(file.fileName, file.contentType)) {
+          throw new Error("PDF file is required.");
+        }
+
+        const path = [
+          "principal-requests",
+          invite.id,
+          `${file.key}-${stamp}-${crypto.randomUUID()}-${getPrincipalUploadFileName(file.key, file.fileName)}`,
+        ].join("/");
+
+        const { data: signedUrlData, error } = await supabaseAdmin.storage
+          .from(bucket)
+          .createSignedUploadUrl(path, { upsert: true });
+
+        if (error || !signedUrlData?.token) {
+          console.error("[Principal registration upload] Signed upload URL failed", {
+            bucket,
+            key: file.key,
+            inviteId: invite.id,
+            hasToken: Boolean(signedUrlData?.token),
+            message: error?.message,
+            statusCode: "statusCode" in (error || {}) ? error?.statusCode : undefined,
+          });
+          throw new Error("Unable to prepare Principal registration file upload.");
+        }
+
+        return {
+          key: file.key,
+          bucket,
+          path: signedUrlData.path,
+          uploadToken: signedUrlData.token,
+        };
+      }),
+    );
+
+    return {
+      ok: true,
+      uploads: signedUploads,
     };
   });
 
