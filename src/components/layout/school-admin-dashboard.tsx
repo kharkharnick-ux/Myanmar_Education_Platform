@@ -56,6 +56,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { EmptyState } from "@/components/ui-kit/EmptyState";
 import { GlassCard } from "@/components/ui-kit/GlassCard";
 import {
+  createPrincipalDocumentSignedUrl,
   getPrincipalManagementData,
   invitePrincipal,
   registerSelfPrincipal,
@@ -1993,8 +1994,14 @@ export function PrincipalManagementPage() {
 
       setRequests((result.requests || []) as PrincipalRegistrationRequest[]);
       setActivePrincipal((result.activePrincipal || null) as ActivePrincipal | null);
+      setRegions((result.regions || []) as RegionOption[]);
+      setAllTownships((result.townships || []) as TownshipOption[]);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to load Principal data.");
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Principal အချက်အလက်များကို ယာယီဖွင့်မရပါ။ ပြန်စမ်းကြည့်ပါ။",
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -2006,33 +2013,16 @@ export function PrincipalManagementPage() {
   }, [access.school.id]);
 
   useEffect(() => {
-    supabase
-      .from("regions")
-      .select("id, name")
-      .order("name")
-      .then(({ data }) => setRegions((data || []) as RegionOption[]));
-
-    supabase
-      .from("townships")
-      .select("id, region_id, name")
-      .order("name")
-      .then(({ data }) => setAllTownships((data || []) as TownshipOption[]));
-  }, []);
-
-  useEffect(() => {
     if (!selfForm.stateRegionId) {
       setTownships([]);
       setSelfForm((current) => ({ ...current, townshipId: "" }));
       return;
     }
 
-    supabase
-      .from("townships")
-      .select("id, region_id, name")
-      .eq("region_id", Number(selfForm.stateRegionId))
-      .order("name")
-      .then(({ data }) => setTownships((data || []) as TownshipOption[]));
-  }, [selfForm.stateRegionId]);
+    setTownships(
+      allTownships.filter((township) => township.region_id === Number(selfForm.stateRegionId)),
+    );
+  }, [allTownships, selfForm.stateRegionId]);
 
   const getAccessToken = async () => {
     const { data, error } = await supabase.auth.getSession();
@@ -2100,18 +2090,22 @@ export function PrincipalManagementPage() {
 
     setErrorMessage("");
 
-    const { data, error } = await supabase.storage
-      .from(document.bucket)
-      .createSignedUrl(document.path, 60 * 5);
+    try {
+      const accessToken = await getAccessToken();
+      const result = await createPrincipalDocumentSignedUrl({
+        data: {
+          accessToken,
+          bucket: document.bucket,
+          path: document.path,
+        },
+      });
 
-    if (error || !data?.signedUrl) {
+      window.open(result.signedUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
       setErrorMessage(
-        error?.message || `${document.label} file ကို ဖွင့်၍မရပါ။ Storage permission ကို စစ်ဆေးပါ။`,
+        error instanceof Error ? error.message : `${document.label} file ကို ဖွင့်၍မရပါ။`,
       );
-      return;
     }
-
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   };
 
   const updateSelfForm = (key: keyof PrincipalSelfFormValues, value: string | boolean) => {

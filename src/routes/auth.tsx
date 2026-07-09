@@ -4,6 +4,7 @@ import { Logo } from "@/components/site/Logo";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "@tanstack/react-router";
 import { useTheme } from "@/lib/theme";
+import { getPrincipalDashboardAccess } from "@/lib/api/principal-account.functions";
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -79,6 +80,28 @@ async function handleSubmit(e: FormEvent) {
           .eq("id", data.user.id)
           .maybeSingle()
       : { data: null };
+
+    const accessToken = data.session?.access_token;
+    if (accessToken) {
+      try {
+        const principalAccess = await getPrincipalDashboardAccess({
+          data: { accessToken },
+        });
+
+        if (
+          principalAccess.status === "approved" ||
+          principalAccess.status === "pending" ||
+          principalAccess.status === "rejected"
+        ) {
+          navigate({
+            to: "/principal/dashboard",
+          });
+          return;
+        }
+      } catch (principalAccessError) {
+        console.error("[Auth] Principal access check failed", principalAccessError);
+      }
+    }
 
     if (profile?.role === "school_admin") {
       navigate({

@@ -7,6 +7,7 @@ import {
   activateApprovedSchoolAdminRegistration,
   requestSchoolAdminPasswordSetupLink,
 } from "@/lib/api/school-admin-account.functions";
+import { getPrincipalDashboardAccess } from "@/lib/api/principal-account.functions";
 
 const INVALID_PASSWORD_SETUP_LINK_MESSAGE =
   "Password setup link သက်တမ်းကုန်သွားပါသည် သို့မဟုတ် မမှန်ကန်ပါ။ Password setup link အသစ်တောင်းပါ။";
@@ -178,6 +179,19 @@ function SetupPasswordPage() {
       if (sessionError) throw sessionError;
       if (!session?.access_token)
         throw new Error("Unable to finalize approval. Please open the setup link again.");
+
+      const principalAccess = await getPrincipalDashboardAccess({
+        data: { accessToken: session.access_token },
+      });
+
+      if (principalAccess.status === "approved") {
+        await supabase.auth.signOut();
+        navigate({
+          to: "/auth",
+          search: { password_created: "1" },
+        });
+        return;
+      }
 
       await activateApprovedSchoolAdminRegistration({
         data: { accessToken: session.access_token },
