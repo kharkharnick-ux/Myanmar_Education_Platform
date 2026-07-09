@@ -57,6 +57,10 @@ const registerSelfPrincipalSchema = z.object({
   accessToken: z.string().min(1).optional(),
 });
 
+const principalManagementSchema = z.object({
+  accessToken: z.string().min(1).optional(),
+});
+
 const reviewPrincipalSchema = z.object({
   accessToken: z.string().min(1).optional(),
   requestId: z.string().uuid(),
@@ -129,9 +133,64 @@ type PrincipalRequestRow = {
   updated_at?: string | null;
 };
 
+type ActivePrincipalTeacherRow = {
+  id: string;
+  profile_id: string | null;
+  school_id: string | null;
+  level: string | null;
+  created_at: string | null;
+};
+
+type ActivePrincipalProfileRow = {
+  id: string;
+  full_name: string | null;
+  email: string | null;
+  phone: string | null;
+  avatar_url: string | null;
+  status: string | null;
+};
+
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 const sanitizePrincipalUploadFileName = (name: string) =>
   name.replace(/[^a-zA-Z0-9.\-_]+/g, "-").slice(0, 90) || "upload";
+
+const principalManagementRequestSelect = [
+  "id",
+  "email",
+  "phone",
+  "full_name_mm",
+  "full_name_en",
+  "date_of_birth",
+  "gender",
+  "nrc_number",
+  "residential_address",
+  "state_region_id",
+  "township_id",
+  "nrc_front_url",
+  "nrc_back_url",
+  "status",
+  "invite_note",
+  "invite_token_expires_at",
+  "highest_education",
+  "major",
+  "years_of_teaching_experience",
+  "years_of_management_experience",
+  "previous_school",
+  "current_position",
+  "profile_photo_url",
+  "degree_certificate_url",
+  "teaching_license_url",
+  "appointment_letter_url",
+  "resume_url",
+  "recommendation_letter_url",
+  "emergency_contact_name",
+  "emergency_contact_relationship",
+  "emergency_contact_phone",
+  "rejection_reason",
+  "reviewed_at",
+  "created_at",
+  "updated_at",
+].join(", ");
 
 const principalUploadBucketByKey = {
   profilePhoto: "application-nrc-docs",
@@ -873,6 +932,98 @@ export const invitePrincipal = createServerFn({ method: "POST" })
       });
       throw error;
     }
+  });
+
+export const getPrincipalManagementData = createServerFn({ method: "POST" })
+  .validator(principalManagementSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { school } = await getSchoolAdminContext(supabaseAdmin, data.accessToken);
+
+    const { data: requests, error: requestError } = await supabaseAdmin
+      .from("registration_requests")
+      .select(principalManagementRequestSelect)
+      .eq("request_type", "principal")
+      .eq("approved_school_id", school.id)
+      .order("created_at", { ascending: false });
+
+    if (requestError) {
+      console.error("[Principal management] Request query failed", {
+        schoolId: school.id,
+        message: requestError.message,
+        code: requestError.code,
+      });
+      throw new Error("Unable to load Principal data.");
+    }
+
+    const { data: teacherData, error: teacherError } = await supabaseAdmin
+      .from("teachers")
+      .select("id, profile_id, school_id, level, created_at")
+      .eq("school_id", school.id)
+      .eq("level", "principal")
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (teacherError) {
+      console.error("[Principal management] Active principal teacher query failed", {
+        schoolId: school.id,
+        message: teacherError.message,
+        code: teacherError.code,
+      });
+      throw new Error("Unable to load Principal data.");
+    }
+
+    const teacher = teacherData as ActivePrincipalTeacherRow | null;
+    let profile: ActivePrincipalProfileRow | null = null;
+
+    if (teacher?.profile_id) {
+      const { data: profileData, error: profileError } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, email, phone, avatar_url, status")
+        .eq("id", teacher.profile_id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error("[Principal management] Active principal profile query failed", {
+          schoolId: school.id,
+          profileId: teacher.profile_id,
+          message: profileError.message,
+          code: profileError.code,
+        });
+        throw new Error("Unable to load Principal data.");
+      }
+
+      profile = profileData as ActivePrincipalProfileRow | null;
+    }
+
+    const activePrincipal = teacher
+      ? {
+          id: teacher.id,
+          profile_id: teacher.profile_id,
+          school_id: teacher.school_id,
+          level: teacher.level,
+          created_at: teacher.created_at,
+          full_name: profile?.full_name || null,
+          email: profile?.email || null,
+          phone: profile?.phone || null,
+          avatar_url: profile?.avatar_url || null,
+        }
+      : null;
+
+    console.info("[Principal management] Loaded dashboard data", {
+      schoolId: school.id,
+      requestCount: requests?.length || 0,
+      pendingCount: (requests || []).filter((request) => request.status === "pending").length,
+      activePrincipalExists: Boolean(activePrincipal),
+    });
+
+    return {
+      ok: true,
+      requests: requests || [],
+      activePrincipal,
+    };
   });
 
 export const registerSelfPrincipal = createServerFn({ method: "POST" })

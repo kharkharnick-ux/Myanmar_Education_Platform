@@ -56,6 +56,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { EmptyState } from "@/components/ui-kit/EmptyState";
 import { GlassCard } from "@/components/ui-kit/GlassCard";
 import {
+  getPrincipalManagementData,
   invitePrincipal,
   registerSelfPrincipal,
   reviewPrincipalRegistration,
@@ -1983,67 +1984,15 @@ export function PrincipalManagementPage() {
     setErrorMessage("");
 
     try {
-      const { data: requestData, error: requestError } = await supabase
-        .from("registration_requests")
-        .select(principalRegistrationRequestSelect)
-        .eq("request_type", "principal")
-        .eq("approved_school_id", access.school.id)
-        .order("created_at", { ascending: false });
-
-      if (requestError) throw requestError;
-      setRequests((requestData || []) as unknown as PrincipalRegistrationRequest[]);
-
-      const { data: teacherData, error: teacherError } = await supabase
-        .from("teachers")
-        .select("id, profile_id, school_id, level, created_at")
-        .eq("school_id", access.school.id)
-        .eq("level", "principal")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (teacherError) {
-        console.error("Active principal teacher query error", teacherError);
-        throw teacherError;
-      }
-
-      if (!teacherData) {
-        setActivePrincipal(null);
-        return;
-      }
-
-      const teacher = teacherData as Pick<
-        ActivePrincipal,
-        "id" | "profile_id" | "school_id" | "level" | "created_at"
-      >;
-      let profile: ActivePrincipalProfile | null = null;
-
-      if (teacher.profile_id) {
-        const { data: profileData, error: profileError } = await supabase
-          .from("profiles")
-          .select("id, full_name, email, phone, avatar_url, status")
-          .eq("id", teacher.profile_id)
-          .maybeSingle();
-
-        if (profileError) {
-          console.error("Active principal profile query error", profileError);
-          throw profileError;
-        }
-
-        profile = profileData as ActivePrincipalProfile | null;
-      }
-
-      setActivePrincipal({
-        id: teacher.id,
-        profile_id: teacher.profile_id,
-        school_id: teacher.school_id,
-        level: teacher.level,
-        created_at: teacher.created_at,
-        full_name: profile?.full_name || null,
-        email: profile?.email || null,
-        phone: profile?.phone || null,
-        avatar_url: profile?.avatar_url || null,
+      const accessToken = await getAccessToken();
+      const result = await getPrincipalManagementData({
+        data: {
+          accessToken,
+        },
       });
+
+      setRequests((result.requests || []) as PrincipalRegistrationRequest[]);
+      setActivePrincipal((result.activePrincipal || null) as ActivePrincipal | null);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to load Principal data.");
     } finally {
