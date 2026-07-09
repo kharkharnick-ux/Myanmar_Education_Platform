@@ -51,6 +51,7 @@ import { Route as PrincipalRegisterRouteImport } from './routes/principal.regist
 import { Route as AuthSetupPasswordRouteImport } from './routes/auth.setup-password'
 import { Route as RegisterSchoolAdminStatusRouteImport } from './routes/register.school-admin.status'
 import { Route as RegisterSchoolAdminPendingRouteImport } from './routes/register.school-admin.pending'
+import { Route as PrincipalRegisterFormRouteImport } from './routes/principal.register.form'
 
 const SupportRoute = SupportRouteImport.update({
   id: '/support',
@@ -267,6 +268,11 @@ const RegisterSchoolAdminPendingRoute =
     path: '/pending',
     getParentRoute: () => RegisterSchoolAdminRoute,
   } as any)
+const PrincipalRegisterFormRoute = PrincipalRegisterFormRouteImport.update({
+  id: '/form',
+  path: '/form',
+  getParentRoute: () => PrincipalRegisterRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -284,7 +290,7 @@ export interface FileRoutesByFullPath {
   '/super-admin': typeof SuperAdminRouteWithChildren
   '/support': typeof SupportRoute
   '/auth/setup-password': typeof AuthSetupPasswordRoute
-  '/principal/register': typeof PrincipalRegisterRoute
+  '/principal/register': typeof PrincipalRegisterRouteWithChildren
   '/register/school': typeof RegisterSchoolRoute
   '/register/school-admin': typeof RegisterSchoolAdminRouteWithChildren
   '/school-admin/academic': typeof SchoolAdminAcademicRoute
@@ -309,6 +315,7 @@ export interface FileRoutesByFullPath {
   '/super-admin/settings': typeof SuperAdminSettingsRoute
   '/super-admin/support': typeof SuperAdminSupportRoute
   '/super-admin/': typeof SuperAdminIndexRoute
+  '/principal/register/form': typeof PrincipalRegisterFormRoute
   '/register/school-admin/pending': typeof RegisterSchoolAdminPendingRoute
   '/register/school-admin/status': typeof RegisterSchoolAdminStatusRoute
 }
@@ -327,7 +334,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/support': typeof SupportRoute
   '/auth/setup-password': typeof AuthSetupPasswordRoute
-  '/principal/register': typeof PrincipalRegisterRoute
+  '/principal/register': typeof PrincipalRegisterRouteWithChildren
   '/register/school': typeof RegisterSchoolRoute
   '/register/school-admin': typeof RegisterSchoolAdminRouteWithChildren
   '/school-admin/academic': typeof SchoolAdminAcademicRoute
@@ -352,6 +359,7 @@ export interface FileRoutesByTo {
   '/super-admin/settings': typeof SuperAdminSettingsRoute
   '/super-admin/support': typeof SuperAdminSupportRoute
   '/super-admin': typeof SuperAdminIndexRoute
+  '/principal/register/form': typeof PrincipalRegisterFormRoute
   '/register/school-admin/pending': typeof RegisterSchoolAdminPendingRoute
   '/register/school-admin/status': typeof RegisterSchoolAdminStatusRoute
 }
@@ -372,7 +380,7 @@ export interface FileRoutesById {
   '/super-admin': typeof SuperAdminRouteWithChildren
   '/support': typeof SupportRoute
   '/auth/setup-password': typeof AuthSetupPasswordRoute
-  '/principal/register': typeof PrincipalRegisterRoute
+  '/principal/register': typeof PrincipalRegisterRouteWithChildren
   '/register/school': typeof RegisterSchoolRoute
   '/register/school-admin': typeof RegisterSchoolAdminRouteWithChildren
   '/school-admin/academic': typeof SchoolAdminAcademicRoute
@@ -397,6 +405,7 @@ export interface FileRoutesById {
   '/super-admin/settings': typeof SuperAdminSettingsRoute
   '/super-admin/support': typeof SuperAdminSupportRoute
   '/super-admin/': typeof SuperAdminIndexRoute
+  '/principal/register/form': typeof PrincipalRegisterFormRoute
   '/register/school-admin/pending': typeof RegisterSchoolAdminPendingRoute
   '/register/school-admin/status': typeof RegisterSchoolAdminStatusRoute
 }
@@ -443,6 +452,7 @@ export interface FileRouteTypes {
     | '/super-admin/settings'
     | '/super-admin/support'
     | '/super-admin/'
+    | '/principal/register/form'
     | '/register/school-admin/pending'
     | '/register/school-admin/status'
   fileRoutesByTo: FileRoutesByTo
@@ -486,6 +496,7 @@ export interface FileRouteTypes {
     | '/super-admin/settings'
     | '/super-admin/support'
     | '/super-admin'
+    | '/principal/register/form'
     | '/register/school-admin/pending'
     | '/register/school-admin/status'
   id:
@@ -530,6 +541,7 @@ export interface FileRouteTypes {
     | '/super-admin/settings'
     | '/super-admin/support'
     | '/super-admin/'
+    | '/principal/register/form'
     | '/register/school-admin/pending'
     | '/register/school-admin/status'
   fileRoutesById: FileRoutesById
@@ -549,7 +561,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SuperAdminRoute: typeof SuperAdminRouteWithChildren
   SupportRoute: typeof SupportRoute
-  PrincipalRegisterRoute: typeof PrincipalRegisterRoute
+  PrincipalRegisterRoute: typeof PrincipalRegisterRouteWithChildren
   RegisterSchoolRoute: typeof RegisterSchoolRoute
   RegisterSchoolAdminRoute: typeof RegisterSchoolAdminRouteWithChildren
 }
@@ -850,6 +862,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RegisterSchoolAdminPendingRouteImport
       parentRoute: typeof RegisterSchoolAdminRoute
     }
+    '/principal/register/form': {
+      id: '/principal/register/form'
+      path: '/form'
+      fullPath: '/principal/register/form'
+      preLoaderRoute: typeof PrincipalRegisterFormRouteImport
+      parentRoute: typeof PrincipalRegisterRoute
+    }
   }
 }
 
@@ -928,6 +947,17 @@ const SuperAdminRouteWithChildren = SuperAdminRoute._addFileChildren(
   SuperAdminRouteChildren,
 )
 
+interface PrincipalRegisterRouteChildren {
+  PrincipalRegisterFormRoute: typeof PrincipalRegisterFormRoute
+}
+
+const PrincipalRegisterRouteChildren: PrincipalRegisterRouteChildren = {
+  PrincipalRegisterFormRoute: PrincipalRegisterFormRoute,
+}
+
+const PrincipalRegisterRouteWithChildren =
+  PrincipalRegisterRoute._addFileChildren(PrincipalRegisterRouteChildren)
+
 interface RegisterSchoolAdminRouteChildren {
   RegisterSchoolAdminPendingRoute: typeof RegisterSchoolAdminPendingRoute
   RegisterSchoolAdminStatusRoute: typeof RegisterSchoolAdminStatusRoute
@@ -956,7 +986,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SuperAdminRoute: SuperAdminRouteWithChildren,
   SupportRoute: SupportRoute,
-  PrincipalRegisterRoute: PrincipalRegisterRoute,
+  PrincipalRegisterRoute: PrincipalRegisterRouteWithChildren,
   RegisterSchoolRoute: RegisterSchoolRoute,
   RegisterSchoolAdminRoute: RegisterSchoolAdminRouteWithChildren,
 }
