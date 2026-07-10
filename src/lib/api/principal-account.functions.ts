@@ -42,8 +42,8 @@ const submitPrincipalRegistrationSchema = z.object({
   currentPosition: z.string(),
   nrcFrontUrl: z.string().min(1),
   nrcBackUrl: z.string().min(1),
-  degreeCertificateUrl: z.string().min(1),
-  teachingLicenseUrl: z.string().min(1),
+  degreeCertificateUrl: z.string().nullable(),
+  teachingLicenseUrl: z.string().nullable(),
   appointmentLetterUrl: z.string().nullable(),
   resumeUrl: z.string().nullable(),
   recommendationLetterUrl: z.string().nullable(),
@@ -63,6 +63,11 @@ const principalManagementSchema = z.object({
 
 const principalDashboardAccessSchema = z.object({
   accessToken: z.string().min(1).optional(),
+});
+
+const principalPasswordSetupLinkRequestSchema = z.object({
+  email: z.string().email(),
+  nrcLast6: z.string().regex(/^[0-9]{6}$/),
 });
 
 const principalDocumentSignedUrlSchema = z.object({
@@ -148,11 +153,13 @@ type ActivePrincipalTeacherRow = {
   profile_id: string | null;
   school_id: string | null;
   level: string | null;
+  status: string | null;
   created_at: string | null;
 };
 
 type ActivePrincipalProfileRow = {
   id: string;
+  role: string | null;
   full_name: string | null;
   email: string | null;
   phone: string | null;
@@ -161,8 +168,16 @@ type ActivePrincipalProfileRow = {
 };
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
+const toEnglishDigits = (value = "") =>
+  value.replace(/[\u1040-\u1049]/g, (digit) => String(digit.charCodeAt(0) - 0x1040));
+const extractLast6Digits = (value = "") =>
+  toEnglishDigits(value)
+    .replace(/[^0-9]/g, "")
+    .slice(-6);
 const sanitizePrincipalUploadFileName = (name: string) =>
   name.replace(/[^a-zA-Z0-9.\-_]+/g, "-").slice(0, 90) || "upload";
+const PRINCIPAL_TEACHER_ACTIVE_STATUS = "active";
+const PRINCIPAL_TEACHER_PENDING_PASSWORD_STATUS = "pending_password";
 
 const SCHOOL_ADMIN_PROFILE_NOT_FOUND_MESSAGE =
   "School Admin အကောင့်အချက်အလက် မတွေ့ရှိပါ။";
@@ -174,6 +189,8 @@ const ACTIVE_PRINCIPAL_EXISTS_MESSAGE =
   "ဤကျောင်းတွင် Active Principal ရှိပြီးသားဖြစ်ပါသည်။";
 const PRINCIPAL_PENDING_APPROVAL_MESSAGE =
   "သင့် Principal registration ကို School Admin မှ စစ်ဆေးအတည်ပြုရန် စောင့်ဆိုင်းနေပါသည်။";
+const PRINCIPAL_LOGIN_SETUP_PENDING_MESSAGE =
+  "Principal registration အတည်ပြုပြီးပါပြီ။ Login setup link မှ password သတ်မှတ်ပြီးမှ Principal account ကို active ပြုလုပ်ပါမည်။";
 
 type PrincipalServerErrorContext = {
   queryName: string;
@@ -245,6 +262,7 @@ const principalManagementRequestSelect = [
   "emergency_contact_relationship",
   "emergency_contact_phone",
   "rejection_reason",
+  "approved_profile_id",
   "approved_school_id",
   "reviewed_at",
   "created_at",
@@ -255,6 +273,19 @@ type PrincipalManagementRequestForFiltering = {
   id: string;
   email: string;
   status: PrincipalRequestRow["status"];
+  phone?: string | null;
+  full_name_mm?: string | null;
+  full_name_en?: string | null;
+  date_of_birth?: string | null;
+  gender?: string | null;
+  nrc_number?: string | null;
+  residential_address?: string | null;
+  highest_education?: string | null;
+  years_of_teaching_experience?: number | null;
+  years_of_management_experience?: number | null;
+  nrc_front_url?: string | null;
+  nrc_back_url?: string | null;
+  approved_profile_id?: string | null;
   approved_school_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -279,6 +310,32 @@ const getPrincipalDuplicateRequestKey = (
   request: PrincipalManagementRequestForFiltering,
   schoolId: string,
 ) => `${normalizeEmail(request.email)}::${request.approved_school_id || schoolId}`;
+
+const hasPrincipalCompletedSubmissionData = (request: PrincipalManagementRequestForFiltering) =>
+  Boolean(
+    normalizeEmail(request.email) &&
+      request.full_name_mm?.trim() &&
+      request.full_name_en?.trim() &&
+      request.phone?.trim() &&
+      request.date_of_birth &&
+      request.gender?.trim() &&
+      request.nrc_number?.trim() &&
+      request.residential_address?.trim() &&
+      request.highest_education?.trim() &&
+      request.years_of_teaching_experience !== null &&
+      request.years_of_teaching_experience !== undefined &&
+      request.years_of_teaching_experience >= 0 &&
+      request.years_of_management_experience !== null &&
+      request.years_of_management_experience !== undefined &&
+      request.years_of_management_experience >= 0 &&
+      request.nrc_front_url?.trim() &&
+      request.nrc_back_url?.trim(),
+  );
+
+const isPrincipalRequestVisibleInManagement = (request: PrincipalManagementRequestForFiltering) => {
+  if (request.status === "pending") return hasPrincipalCompletedSubmissionData(request);
+  return true;
+};
 
 const filterCurrentActionablePrincipalRequests = <T extends PrincipalManagementRequestForFiltering>(
   requests: T[],
@@ -1052,10 +1109,10 @@ export const invitePrincipal = createServerFn({ method: "POST" })
 
       const { data: existingActivePrincipal, error: activePrincipalError } = await supabaseAdmin
         .from("teachers")
-        .select("id")
+        .select("id, profile_id")
         .eq("school_id", school.id)
         .eq("level", "principal")
-        .eq("status", "active")
+        .eq("status", PRINCIPAL_TEACHER_ACTIVE_STATUS)
         .limit(1)
         .maybeSingle();
 
@@ -1065,7 +1122,29 @@ export const invitePrincipal = createServerFn({ method: "POST" })
           activePrincipalError.message || "Unable to check the current Principal assignment.",
         );
       }
-      if (existingActivePrincipal) {
+      let existingActivePrincipalProfile: { role: string | null; status: string | null } | null =
+        null;
+      const existingActivePrincipalProfileId =
+        typeof existingActivePrincipal?.profile_id === "string"
+          ? existingActivePrincipal.profile_id
+          : null;
+
+      if (existingActivePrincipalProfileId) {
+        const { data: activeProfileData, error: activeProfileError } = await supabaseAdmin
+          .from("profiles")
+          .select("role, status")
+          .eq("id", existingActivePrincipalProfileId)
+          .maybeSingle();
+
+        if (activeProfileError) throw activeProfileError;
+        existingActivePrincipalProfile = activeProfileData as typeof existingActivePrincipalProfile;
+      }
+
+      if (
+        existingActivePrincipal &&
+        existingActivePrincipalProfile?.role === "principal" &&
+        existingActivePrincipalProfile.status === PRINCIPAL_TEACHER_ACTIVE_STATUS
+      ) {
         throw new Error("This school already has an active Principal.");
       }
 
@@ -1075,17 +1154,17 @@ export const invitePrincipal = createServerFn({ method: "POST" })
         request_type: "principal",
         status: "invited",
         email: normalizedEmail,
-        phone: "",
-        full_name_mm: "Invited Principal",
-        full_name_en: "Invited Principal",
+        phone: null,
+        full_name_mm: null,
+        full_name_en: null,
         date_of_birth: null,
         gender: null,
-        nrc_number: "",
-        residential_address: "",
+        nrc_number: null,
+        residential_address: null,
         state_region_id: school.region_id || null,
         township_id: school.township_id || null,
-        nrc_front_url: "",
-        nrc_back_url: "",
+        nrc_front_url: null,
+        nrc_back_url: null,
         approved_school_id: school.id,
         invited_by: user.id,
         invite_token: token,
@@ -1189,10 +1268,10 @@ export const getPrincipalManagementData = createServerFn({ method: "POST" })
 
     const { data: teacherData, error: teacherError } = await supabaseAdmin
       .from("teachers")
-      .select("id, profile_id, school_id, level, created_at")
+      .select("id, profile_id, school_id, level, status, created_at")
       .eq("school_id", school.id)
       .eq("level", "principal")
-      .eq("status", "active")
+      .eq("status", PRINCIPAL_TEACHER_ACTIVE_STATUS)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -1213,7 +1292,7 @@ export const getPrincipalManagementData = createServerFn({ method: "POST" })
     if (teacher?.profile_id) {
       const { data: profileData, error: profileError } = await supabaseAdmin
         .from("profiles")
-        .select("id, full_name, email, phone, avatar_url, status")
+        .select("id, role, full_name, email, phone, avatar_url, status")
         .eq("id", teacher.profile_id)
         .maybeSingle();
 
@@ -1229,6 +1308,58 @@ export const getPrincipalManagementData = createServerFn({ method: "POST" })
       }
 
       profile = profileData as ActivePrincipalProfileRow | null;
+    }
+
+    const { data: pendingTeacherData, error: pendingTeacherError } = await supabaseAdmin
+      .from("teachers")
+      .select("id, profile_id, school_id, level, status, created_at")
+      .eq("school_id", school.id)
+      .eq("level", "principal")
+      .eq("status", PRINCIPAL_TEACHER_PENDING_PASSWORD_STATUS)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (pendingTeacherError) {
+      logPrincipalServerError(
+        "[Principal management] Pending password principal teacher query failed",
+        pendingTeacherError,
+        {
+          queryName: "pending-password-principal-teacher",
+          table: "teachers",
+          schoolId: school.id,
+          expectedColumns: ["id", "profile_id", "school_id", "level", "status", "created_at"],
+        },
+      );
+      throw new Error(PRINCIPAL_MANAGEMENT_LOAD_ERROR_MESSAGE);
+    }
+
+    const pendingTeacher = pendingTeacherData as ActivePrincipalTeacherRow | null;
+    let pendingProfile: ActivePrincipalProfileRow | null = null;
+
+    if (pendingTeacher?.profile_id) {
+      const { data: pendingProfileData, error: pendingProfileError } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, full_name, email, phone, avatar_url, status")
+        .eq("id", pendingTeacher.profile_id)
+        .maybeSingle();
+
+      if (pendingProfileError) {
+        logPrincipalServerError(
+          "[Principal management] Pending password principal profile query failed",
+          pendingProfileError,
+          {
+            queryName: "pending-password-principal-profile",
+            table: "profiles",
+            schoolId: school.id,
+            profileId: pendingTeacher.profile_id,
+            expectedColumns: ["id", "role", "full_name", "email", "phone", "avatar_url", "status"],
+          },
+        );
+        throw new Error(PRINCIPAL_MANAGEMENT_LOAD_ERROR_MESSAGE);
+      }
+
+      pendingProfile = pendingProfileData as ActivePrincipalProfileRow | null;
     }
 
     const { data: regions, error: regionsError } = await supabaseAdmin
@@ -1261,12 +1392,14 @@ export const getPrincipalManagementData = createServerFn({ method: "POST" })
       throw new Error(PRINCIPAL_MANAGEMENT_LOAD_ERROR_MESSAGE);
     }
 
-    const activePrincipal = teacher
+    const activePrincipal =
+      teacher && profile?.role === "principal" && profile.status === PRINCIPAL_TEACHER_ACTIVE_STATUS
       ? {
           id: teacher.id,
           profile_id: teacher.profile_id,
           school_id: teacher.school_id,
           level: teacher.level,
+          status: teacher.status,
           created_at: teacher.created_at,
           full_name: profile?.full_name || null,
           email: profile?.email || null,
@@ -1274,24 +1407,43 @@ export const getPrincipalManagementData = createServerFn({ method: "POST" })
           avatar_url: profile?.avatar_url || null,
         }
       : null;
+    const pendingSetupPrincipal =
+      pendingTeacher && pendingProfile?.role === "principal"
+        ? {
+            id: pendingTeacher.id,
+            profile_id: pendingTeacher.profile_id,
+            school_id: pendingTeacher.school_id,
+            level: pendingTeacher.level,
+            status: pendingTeacher.status,
+            created_at: pendingTeacher.created_at,
+            full_name: pendingProfile?.full_name || null,
+            email: pendingProfile?.email || null,
+            phone: pendingProfile?.phone || null,
+            avatar_url: pendingProfile?.avatar_url || null,
+          }
+        : null;
 
-    const currentRequests = filterCurrentActionablePrincipalRequests(
-      ((requests || []) as PrincipalManagementRequestForFiltering[]),
-      school.id,
+    const visibleRequests = ((requests || []) as PrincipalManagementRequestForFiltering[]).filter(
+      isPrincipalRequestVisibleInManagement,
     );
+    const currentRequests = filterCurrentActionablePrincipalRequests(visibleRequests, school.id);
 
     console.info("[Principal management] Loaded dashboard data", {
       schoolId: school.id,
       requestCount: requests?.length || 0,
+      hiddenIncompletePendingCount:
+        (requests?.length || 0) - visibleRequests.length,
       currentRequestCount: currentRequests.length,
       pendingCount: currentRequests.filter((request) => request.status === "pending").length,
       activePrincipalExists: Boolean(activePrincipal),
+      pendingSetupPrincipalExists: Boolean(pendingSetupPrincipal),
     });
 
     return {
       ok: true,
       requests: currentRequests,
       activePrincipal,
+      pendingSetupPrincipal,
       regions: regions || [],
       townships: townships || [],
     };
@@ -1389,7 +1541,7 @@ export const getPrincipalDashboardAccess = createServerFn({ method: "POST" })
       .select("id, school_id, profile_id, level, status, schools(id, school_name)")
       .eq("profile_id", user.id)
       .eq("level", "principal")
-      .eq("status", "active")
+      .eq("status", PRINCIPAL_TEACHER_ACTIVE_STATUS)
       .limit(1)
       .maybeSingle();
 
@@ -1403,7 +1555,11 @@ export const getPrincipalDashboardAccess = createServerFn({ method: "POST" })
       throw new Error("Principal dashboard ကို ယာယီဖွင့်မရပါ။ ပြန်စမ်းကြည့်ပါ။");
     }
 
-    if (teacher && profile?.status === "active") {
+    if (
+      teacher &&
+      profile?.role === "principal" &&
+      profile.status === PRINCIPAL_TEACHER_ACTIVE_STATUS
+    ) {
       const school = (teacher as { schools?: { id: string; school_name: string | null } | null })
         .schools;
 
@@ -1425,9 +1581,40 @@ export const getPrincipalDashboardAccess = createServerFn({ method: "POST" })
       };
     }
 
+    const { data: pendingTeacher, error: pendingTeacherError } = await supabaseAdmin
+      .from("teachers")
+      .select("id, school_id, profile_id, level, status")
+      .eq("profile_id", user.id)
+      .eq("level", "principal")
+      .eq("status", PRINCIPAL_TEACHER_PENDING_PASSWORD_STATUS)
+      .limit(1)
+      .maybeSingle();
+
+    if (pendingTeacherError) {
+      logPrincipalServerError(
+        "[Principal dashboard] Pending password principal teacher query failed",
+        pendingTeacherError,
+        {
+          queryName: "principal-dashboard-pending-password-teacher",
+          table: "teachers",
+          userId: user.id,
+          expectedColumns: ["id", "school_id", "profile_id", "level", "status"],
+        },
+      );
+      throw new Error("Principal dashboard á€€á€­á€¯ á€šá€¬á€šá€®á€–á€½á€„á€·á€ºá€™á€›á€•á€«á‹ á€•á€¼á€”á€ºá€…á€™á€ºá€¸á€€á€¼á€Šá€·á€ºá€•á€«á‹");
+    }
+
+    if (pendingTeacher && profile?.role === "principal") {
+      return {
+        ok: true,
+        status: "setup_pending" as const,
+        message: PRINCIPAL_LOGIN_SETUP_PENDING_MESSAGE,
+      };
+    }
+
     const { data: request, error: requestError } = await supabaseAdmin
       .from("registration_requests")
-      .select("id, status, rejection_reason, approved_school_id, reviewed_at")
+      .select("id, status, rejection_reason, approved_profile_id, approved_school_id, reviewed_at")
       .eq("request_type", "principal")
       .eq("email", normalizedEmail)
       .order("created_at", { ascending: false })
@@ -1439,7 +1626,14 @@ export const getPrincipalDashboardAccess = createServerFn({ method: "POST" })
         queryName: "principal-dashboard-registration-request",
         table: "registration_requests",
         userId: user.id,
-        expectedColumns: ["id", "status", "rejection_reason", "approved_school_id", "reviewed_at"],
+        expectedColumns: [
+          "id",
+          "status",
+          "rejection_reason",
+          "approved_profile_id",
+          "approved_school_id",
+          "reviewed_at",
+        ],
       });
       throw new Error("Principal dashboard ကို ယာယီဖွင့်မရပါ။ ပြန်စမ်းကြည့်ပါ။");
     }
@@ -1449,6 +1643,14 @@ export const getPrincipalDashboardAccess = createServerFn({ method: "POST" })
         ok: true,
         status: "rejected" as const,
         message: request.rejection_reason || "Principal registration ကို ငြင်းပယ်ထားပါသည်။",
+      };
+    }
+
+    if (request?.status === "approved" || profile?.role === "principal") {
+      return {
+        ok: true,
+        status: "setup_pending" as const,
+        message: PRINCIPAL_LOGIN_SETUP_PENDING_MESSAGE,
       };
     }
 
@@ -1463,6 +1665,239 @@ export const getPrincipalDashboardAccess = createServerFn({ method: "POST" })
       ok: true,
       status: "pending" as const,
       message: PRINCIPAL_PENDING_APPROVAL_MESSAGE,
+    };
+  });
+
+export const activateApprovedPrincipalRegistration = createServerFn({ method: "POST" })
+  .validator(principalDashboardAccessSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const user = await getVerifiedUserFromRequest(data.accessToken);
+    const normalizedEmail = normalizeEmail(user.email || "");
+
+    if (!normalizedEmail) throw new Error("Please sign in again to continue.");
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, role, status, email")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileError) throw profileError;
+    if (!profile || profile.role !== "principal") {
+      return { ok: true, activated: false, reason: "not_principal" as const };
+    }
+
+    const { data: approvedRequestByProfile, error: approvedRequestByProfileError } =
+      await supabaseAdmin
+        .from("registration_requests")
+        .select("id, status, approved_profile_id, approved_school_id, email")
+        .eq("request_type", "principal")
+        .eq("status", "approved")
+        .eq("approved_profile_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+    if (approvedRequestByProfileError) throw approvedRequestByProfileError;
+
+    let approvedRequest = approvedRequestByProfile as {
+      id: string;
+      status: string;
+      approved_profile_id: string | null;
+      approved_school_id: string | null;
+      email: string;
+    } | null;
+
+    if (!approvedRequest) {
+      const { data: approvedRequestByEmail, error: approvedRequestByEmailError } =
+        await supabaseAdmin
+          .from("registration_requests")
+          .select("id, status, approved_profile_id, approved_school_id, email")
+          .eq("request_type", "principal")
+          .eq("status", "approved")
+          .eq("email", normalizedEmail)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+      if (approvedRequestByEmailError) throw approvedRequestByEmailError;
+      approvedRequest = approvedRequestByEmail as typeof approvedRequest;
+    }
+
+    const { data: teacherRows, error: teacherError } = await supabaseAdmin
+      .from("teachers")
+      .select("id, school_id, profile_id, level, status")
+      .eq("profile_id", user.id)
+      .eq("level", "principal")
+      .in("status", [PRINCIPAL_TEACHER_PENDING_PASSWORD_STATUS, PRINCIPAL_TEACHER_ACTIVE_STATUS])
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (teacherError) throw teacherError;
+
+    const teachers = (teacherRows || []) as Array<{
+      id: string;
+      school_id: string | null;
+      profile_id: string | null;
+      level: string | null;
+      status: string | null;
+    }>;
+    const activeTeacher = teachers.find(
+      (teacher) => teacher.status === PRINCIPAL_TEACHER_ACTIVE_STATUS,
+    );
+    const pendingTeacher =
+      teachers.find((teacher) => teacher.status === PRINCIPAL_TEACHER_PENDING_PASSWORD_STATUS) ||
+      null;
+
+    if (activeTeacher && profile.status === PRINCIPAL_TEACHER_ACTIVE_STATUS) {
+      return {
+        ok: true,
+        activated: true,
+        profileId: user.id,
+        schoolId: activeTeacher.school_id,
+      };
+    }
+
+    const teacher = pendingTeacher || activeTeacher || null;
+    if (!teacher) {
+      if (!approvedRequest) {
+        return { ok: true, activated: false, reason: "not_principal" as const };
+      }
+
+      throw new Error("Approved Principal assignment was not found.");
+    }
+
+    if (!teacher.school_id) throw new Error("Approved Principal assignment is missing a school.");
+
+    const { data: activePrincipalRows, error: activePrincipalError } = await supabaseAdmin
+      .from("teachers")
+      .select("id, profile_id, school_id, level, status")
+      .eq("school_id", teacher.school_id)
+      .eq("level", "principal")
+      .eq("status", PRINCIPAL_TEACHER_ACTIVE_STATUS);
+
+    if (activePrincipalError) throw activePrincipalError;
+
+    const otherActiveProfileIds = ((activePrincipalRows || []) as Array<{
+      id: string;
+      profile_id: string | null;
+    }>)
+      .map((activePrincipal) => activePrincipal.profile_id)
+      .filter(
+        (profileId): profileId is string =>
+          Boolean(profileId) && profileId !== user.id,
+      );
+
+    if (otherActiveProfileIds.length > 0) {
+      const { data: otherProfiles, error: otherProfilesError } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, status")
+        .in("id", otherActiveProfileIds);
+
+      if (otherProfilesError) throw otherProfilesError;
+
+      const hasOtherActivePrincipal = ((otherProfiles || []) as Array<{
+        id: string;
+        role: string | null;
+        status: string | null;
+      }>).some(
+        (otherProfile) =>
+          otherProfile.role === "principal" &&
+          otherProfile.status === PRINCIPAL_TEACHER_ACTIVE_STATUS,
+      );
+
+      if (hasOtherActivePrincipal) throw new Error(ACTIVE_PRINCIPAL_EXISTS_MESSAGE);
+    }
+
+    const now = new Date().toISOString();
+
+    const { error: profileUpdateError } = await supabaseAdmin
+      .from("profiles")
+      .update({
+        role: "principal",
+        status: PRINCIPAL_TEACHER_ACTIVE_STATUS,
+        updated_at: now,
+      })
+      .eq("id", user.id);
+
+    if (profileUpdateError) throw profileUpdateError;
+
+    const { error: teacherUpdateError } = await supabaseAdmin
+      .from("teachers")
+      .update({
+        status: PRINCIPAL_TEACHER_ACTIVE_STATUS,
+        updated_at: now,
+      })
+      .eq("id", teacher.id)
+      .eq("profile_id", user.id)
+      .eq("level", "principal");
+
+    if (teacherUpdateError) throw teacherUpdateError;
+
+    return {
+      ok: true,
+      activated: true,
+      profileId: user.id,
+      schoolId: teacher.school_id,
+      requestId: approvedRequest?.id || null,
+    };
+  });
+
+export const requestPrincipalPasswordSetupLink = createServerFn({ method: "POST" })
+  .validator(principalPasswordSetupLinkRequestSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const normalizedEmail = normalizeEmail(data.email);
+
+    const { data: requests, error: requestError } = await supabaseAdmin
+      .from("registration_requests")
+      .select("id, email, nrc_number, status, approved_profile_id, approved_school_id, reviewed_by")
+      .eq("request_type", "principal")
+      .eq("status", "approved")
+      .eq("email", normalizedEmail)
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (requestError) throw requestError;
+
+    const approvedRequest = ((requests || []) as PrincipalRequestRow[]).find(
+      (request) => extractLast6Digits(request.nrc_number || "") === data.nrcLast6,
+    );
+
+    if (!approvedRequest) {
+      throw new Error(
+        "Approved Principal registration was not found. Please check the email and NRC last 6 digits.",
+      );
+    }
+
+    const authUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail);
+    if (!authUser) throw new Error("Approved Principal auth user was not found.");
+
+    const { data: teacher, error: teacherError } = await supabaseAdmin
+      .from("teachers")
+      .select("id, status")
+      .eq("profile_id", authUser.id)
+      .eq("level", "principal")
+      .limit(1)
+      .maybeSingle();
+
+    if (teacherError) throw teacherError;
+    if (teacher?.status === PRINCIPAL_TEACHER_ACTIVE_STATUS) {
+      throw new Error("Principal account is already active. Please sign in from the login page.");
+    }
+
+    const redirectTo = await getPasswordSetupRedirectUrl();
+    const { error: resetError } = await supabaseAdmin.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo,
+    });
+
+    if (resetError) throw resetError;
+
+    return {
+      ok: true,
+      email: normalizedEmail,
+      message: "Password setup link has been sent to the approved Principal email.",
     };
   });
 
@@ -1713,6 +2148,16 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       return { ok: true };
     }
 
+    if (!hasPrincipalCompletedSubmissionData(request)) {
+      console.warn("[Principal approval] Incomplete principal request cannot be approved", {
+        selectedRequestId: request.id,
+        requestEmail: normalizedEmail,
+        schoolId: requestSchoolId,
+        approvalStatusBefore: request.status,
+      });
+      throw new Error("Principal registration is incomplete and cannot be approved.");
+    }
+
     type PrincipalDuplicateRequestRow = {
       id: string;
       status: PrincipalRequestRow["status"];
@@ -1778,7 +2223,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       .select("id, profile_id")
       .eq("school_id", requestSchoolId)
       .eq("level", "principal")
-      .eq("status", "active")
+      .eq("status", PRINCIPAL_TEACHER_ACTIVE_STATUS)
       .limit(1)
       .maybeSingle();
 
@@ -1793,10 +2238,51 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       throw activePrincipalError;
     }
 
-    const activePrincipalProfileId =
+    let activePrincipalProfile: { id: string; role: string | null; status: string | null } | null =
+      null;
+    const rawActivePrincipalProfileId =
       typeof activePrincipal?.profile_id === "string" ? activePrincipal.profile_id : null;
-    const shouldBlockApproval = Boolean(
+
+    if (rawActivePrincipalProfileId) {
+      const { data: activePrincipalProfileData, error: activePrincipalProfileError } =
+        await supabaseAdmin
+          .from("profiles")
+          .select("id, role, status")
+          .eq("id", rawActivePrincipalProfileId)
+          .maybeSingle();
+
+      if (activePrincipalProfileError) {
+        logPrincipalServerError(
+          "[Principal approval] Active principal profile check failed",
+          activePrincipalProfileError,
+          {
+            queryName: "review-active-principal-profile-check",
+            table: "profiles",
+            userId: user.id,
+            profileId: rawActivePrincipalProfileId,
+            schoolId: requestSchoolId,
+            expectedColumns: ["id", "role", "status"],
+          },
+        );
+        throw activePrincipalProfileError;
+      }
+
+      activePrincipalProfile = activePrincipalProfileData as {
+        id: string;
+        role: string | null;
+        status: string | null;
+      } | null;
+    }
+
+    const activePrincipalFound = Boolean(
       activePrincipal &&
+        activePrincipalProfile?.role === "principal" &&
+        activePrincipalProfile.status === PRINCIPAL_TEACHER_ACTIVE_STATUS,
+    );
+    const activePrincipalProfileId =
+      activePrincipalFound && rawActivePrincipalProfileId ? rawActivePrincipalProfileId : null;
+    const shouldBlockApproval = Boolean(
+      activePrincipalFound &&
         (!initialTargetPrincipalProfileId ||
           activePrincipalProfileId !== initialTargetPrincipalProfileId),
     );
@@ -1806,7 +2292,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       requestEmail: normalizedEmail,
       schoolId: requestSchoolId,
       duplicateRequestCount,
-      activePrincipalFound: Boolean(activePrincipal),
+      activePrincipalFound,
       activePrincipalProfileId,
       targetPrincipalProfileId: initialTargetPrincipalProfileId,
       shouldBlockApproval,
@@ -1867,20 +2353,9 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       throw profileError;
     }
 
-    const teacherPayload = {
-      school_id: requestSchoolId,
-      profile_id: authUser.id,
-      level: "principal",
-      status: "active",
-      full_name: request.full_name_mm,
-      email: normalizedEmail,
-      phone: request.phone,
-      updated_at: now,
-    };
-
     const { data: existingPrincipalTeacher, error: existingTeacherError } = await supabaseAdmin
       .from("teachers")
-      .select("id")
+      .select("id, status")
       .eq("school_id", requestSchoolId)
       .eq("profile_id", authUser.id)
       .eq("level", "principal")
@@ -1902,6 +2377,21 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       );
       throw existingTeacherError;
     }
+
+    const teacherAssignmentStatus =
+      existingPrincipalTeacher?.status === PRINCIPAL_TEACHER_ACTIVE_STATUS
+        ? PRINCIPAL_TEACHER_ACTIVE_STATUS
+        : PRINCIPAL_TEACHER_PENDING_PASSWORD_STATUS;
+    const teacherPayload = {
+      school_id: requestSchoolId,
+      profile_id: authUser.id,
+      level: "principal",
+      status: teacherAssignmentStatus,
+      full_name: request.full_name_mm,
+      email: normalizedEmail,
+      phone: request.phone,
+      updated_at: now,
+    };
 
     if (existingPrincipalTeacher?.id) {
       const { error: teacherUpdateError } = await supabaseAdmin
@@ -2023,12 +2513,13 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       requestEmail: normalizedEmail,
       schoolId: requestSchoolId,
       duplicateRequestCount,
-      activePrincipalFound: Boolean(activePrincipal),
+      activePrincipalFound,
       activePrincipalProfileId,
       targetPrincipalProfileId: authUser.id,
       shouldBlockApproval: false,
       approvalStatusBefore: request.status,
       approvalStatusAfter: approvedRequest.status,
+      teacherAssignmentStatus,
       duplicateRequestsMarkedRejected: actionableDuplicateRequestIds.length,
       authEmailAction: authResult.emailAction,
     });
@@ -2037,7 +2528,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       ok: true,
       message:
         authResult.emailAction === "password_reset"
-          ? `Principal account approved. Password reset email sent to ${normalizedEmail}.`
-          : `Principal account approved. Password setup email sent to ${normalizedEmail}.`,
+          ? `Principal account approved. Password reset email sent to ${normalizedEmail}. Principal remains pending until password setup is complete.`
+          : `Principal account approved. Password setup email sent to ${normalizedEmail}. Principal remains pending until password setup is complete.`,
     };
   });

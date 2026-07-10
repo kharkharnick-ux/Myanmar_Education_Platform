@@ -90,6 +90,7 @@ async function handleSubmit(e: FormEvent) {
 
         if (
           principalAccess.status === "approved" ||
+          principalAccess.status === "setup_pending" ||
           principalAccess.status === "pending" ||
           principalAccess.status === "rejected"
         ) {

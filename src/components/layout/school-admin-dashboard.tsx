@@ -1796,6 +1796,7 @@ type ActivePrincipal = {
   profile_id: string | null;
   school_id: string | null;
   level: string | null;
+  status: string | null;
   created_at: string | null;
   full_name: string | null;
   email: string | null;
@@ -1812,7 +1813,7 @@ type ActivePrincipalProfile = {
   status: string | null;
 };
 
-type PrincipalTab = "invited" | "pending" | "active";
+type PrincipalTab = "invited" | "pending" | "setup" | "active" | "rejected";
 type PrincipalMode = "self" | "invite";
 
 const principalRegistrationRequestSelect = [
@@ -1930,6 +1931,7 @@ export function PrincipalManagementPage() {
   const [principalMode, setPrincipalMode] = useState<PrincipalMode | null>(null);
   const [requests, setRequests] = useState<PrincipalRegistrationRequest[]>([]);
   const [activePrincipal, setActivePrincipal] = useState<ActivePrincipal | null>(null);
+  const [pendingSetupPrincipal, setPendingSetupPrincipal] = useState<ActivePrincipal | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -1971,6 +1973,8 @@ export function PrincipalManagementPage() {
 
   const invitedRequests = requests.filter((request) => request.status === "invited");
   const pendingRequests = requests.filter((request) => request.status === "pending");
+  const rejectedRequests = requests.filter((request) => request.status === "rejected");
+  const hasPrincipalAssignment = Boolean(activePrincipal || pendingSetupPrincipal);
   const regionNameById = useMemo(
     () => new Map(regions.map((region) => [region.id, region.name])),
     [regions],
@@ -1995,6 +1999,9 @@ export function PrincipalManagementPage() {
 
       setRequests((result.requests || []) as PrincipalRegistrationRequest[]);
       setActivePrincipal((result.activePrincipal || null) as ActivePrincipal | null);
+      setPendingSetupPrincipal(
+        (result.pendingSetupPrincipal || null) as ActivePrincipal | null,
+      );
       setRegions((result.regions || []) as RegionOption[]);
       setAllTownships((result.townships || []) as TownshipOption[]);
     } catch (error) {
@@ -2217,7 +2224,8 @@ export function PrincipalManagementPage() {
       setRejectingId("");
       setRejectionReason("");
       await loadPrincipalData(false);
-      if (status === "approved") setTab("active");
+      if (status === "approved") setTab("setup");
+      if (status === "rejected") setTab("rejected");
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Unable to review Principal request.",
@@ -2230,7 +2238,14 @@ export function PrincipalManagementPage() {
   const tabs: Array<{ key: PrincipalTab; label: string; count: number; icon: LucideIcon }> = [
     { key: "invited", label: "Pending Invitations", count: invitedRequests.length, icon: MailPlus },
     { key: "pending", label: "Pending Reviews", count: pendingRequests.length, icon: Clock3 },
+    {
+      key: "setup",
+      label: "Setup Pending",
+      count: pendingSetupPrincipal ? 1 : 0,
+      icon: Lock,
+    },
     { key: "active", label: "Active Principal", count: activePrincipal ? 1 : 0, icon: ShieldCheck },
+    { key: "rejected", label: "Rejected", count: rejectedRequests.length, icon: XCircle },
   ];
 
   return (
@@ -2311,7 +2326,7 @@ export function PrincipalManagementPage() {
               type="button"
               className="aqua-button mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               onClick={handleSelfPrincipalConfirm}
-              disabled={selfSubmitting || Boolean(activePrincipal)}
+              disabled={selfSubmitting || hasPrincipalAssignment}
             >
               {selfSubmitting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -2328,17 +2343,17 @@ export function PrincipalManagementPage() {
             email={inviteEmail}
             note={inviteNote}
             inviting={inviting}
-            activePrincipal={Boolean(activePrincipal)}
+            activePrincipal={hasPrincipalAssignment}
             onEmailChange={setInviteEmail}
             onNoteChange={setInviteNote}
             onSubmit={handleInvite}
           />
         )}
 
-        {principalMode && activePrincipal && (
+        {principalMode && hasPrincipalAssignment && (
           <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-semibold text-amber-700 dark:text-amber-200">
-            This school already has an active Principal. New setup actions are disabled until the
-            active Principal changes.
+            This school already has a Principal assignment. New setup actions are disabled while
+            the Principal is active or waiting for password setup.
           </div>
         )}
 
@@ -2476,11 +2491,30 @@ export function PrincipalManagementPage() {
                   />
                 )}
               </div>
-            ) : (
+            ) : tab === "setup" ? (
+              <PrincipalSetupPendingCard
+                principal={pendingSetupPrincipal}
+                schoolName={access.school.school_name}
+              />
+            ) : tab === "active" ? (
               <PrincipalActiveCard
                 principal={activePrincipal}
                 schoolName={access.school.school_name}
               />
+            ) : (
+              <div className="grid gap-4 xl:grid-cols-2">
+                {rejectedRequests.length > 0 ? (
+                  rejectedRequests.map((request) => (
+                    <PrincipalRejectedCard key={request.id} request={request} />
+                  ))
+                ) : (
+                  <EmptyState
+                    icon={XCircle}
+                    title="No rejected requests"
+                    description="Rejected Principal registrations will appear here."
+                  />
+                )}
+              </div>
             )}
           </div>
         )}
@@ -2895,7 +2929,7 @@ const getPrincipalUploadedDocuments = (
     path: request.degree_certificate_url,
     documentType: "degreeCertificate",
     buttonLabel: "Open PDF",
-    required: true,
+    optional: true,
   },
   {
     label: "သင်ကြားခွင့် / လုပ်ငန်းလိုင်စင်လက်မှတ်",
@@ -2903,7 +2937,7 @@ const getPrincipalUploadedDocuments = (
     path: request.teaching_license_url,
     documentType: "teachingLicense",
     buttonLabel: "Open PDF",
-    required: true,
+    optional: true,
   },
   {
     label: "Appointment Letter",
@@ -3166,6 +3200,84 @@ function PrincipalReviewCard({
   );
 }
 
+function PrincipalSetupPendingCard({
+  principal,
+  schoolName,
+}: {
+  principal: ActivePrincipal | null;
+  schoolName: string;
+}) {
+  if (!principal) {
+    return (
+      <EmptyState
+        icon={Lock}
+        title="No password setup pending"
+        description={`No approved Principal for ${schoolName} is waiting for password setup.`}
+      />
+    );
+  }
+
+  return (
+    <GlassCard className="rounded-[2rem] p-6">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+        <div className="theme-icon-tile h-16 w-16 rounded-3xl">
+          {principal.avatar_url ? (
+            <img
+              src={principal.avatar_url}
+              alt=""
+              className="h-full w-full rounded-3xl object-cover"
+            />
+          ) : (
+            <Lock className="h-7 w-7" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-xl font-bold text-foreground">
+              {principal.full_name || "Approved Principal"}
+            </h3>
+            <StatusPill icon={Clock3} label="Password Setup Pending" tone="amber" />
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Approved for {schoolName}. The account becomes active after password setup.
+          </p>
+        </div>
+      </div>
+      <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <DetailItem label="Email" value={principal.email} />
+        <DetailItem label="Phone" value={principal.phone} />
+        <DetailItem label="Approved Since" value={formatDashboardDate(principal.created_at)} />
+      </div>
+    </GlassCard>
+  );
+}
+
+function PrincipalRejectedCard({ request }: { request: PrincipalRegistrationRequest }) {
+  return (
+    <GlassCard className="rounded-[2rem] p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <SectionTitle
+            icon={XCircle}
+            title={request.full_name_mm || request.full_name_en || request.email}
+          />
+          <p className="mt-2 text-sm text-muted-foreground">
+            Reviewed {formatDashboardDate(request.reviewed_at || request.updated_at)}
+          </p>
+        </div>
+        <StatusPill icon={XCircle} label="Rejected" tone="destructive" />
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <DetailItem label="Email" value={request.email} />
+        <DetailItem label="Phone" value={request.phone} />
+      </div>
+      <p className="mt-4 rounded-2xl border border-destructive/20 bg-destructive/10 p-3 text-sm leading-6 text-destructive">
+        {request.rejection_reason || "No rejection reason provided."}
+      </p>
+    </GlassCard>
+  );
+}
+
 function PrincipalActiveCard({
   principal,
   schoolName,
@@ -3223,15 +3335,18 @@ function StatusPill({
 }: {
   icon: LucideIcon;
   label: string;
-  tone: "amber" | "emerald";
+  tone: "amber" | "emerald" | "destructive";
 }) {
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold",
-        tone === "emerald"
-          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
-          : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-200",
+        tone === "emerald" &&
+          "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300",
+        tone === "amber" &&
+          "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-200",
+        tone === "destructive" &&
+          "border-destructive/25 bg-destructive/10 text-destructive",
       )}
     >
       <Icon className="h-3.5 w-3.5" />

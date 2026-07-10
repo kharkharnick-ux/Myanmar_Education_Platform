@@ -10,6 +10,7 @@ type PrincipalDashboardState =
   | { status: "signed-out" }
   | { status: "error"; message: string }
   | { status: "pending"; message: string }
+  | { status: "setup_pending"; message: string }
   | { status: "rejected"; message: string }
   | {
       status: "approved";
@@ -73,6 +74,11 @@ function PrincipalDashboardRoute() {
 
         if (result.status === "pending") {
           setState({ status: "pending", message: result.message });
+          return;
+        }
+
+        if (result.status === "setup_pending") {
+          setState({ status: "setup_pending", message: result.message });
           return;
         }
 
@@ -145,6 +151,14 @@ function PrincipalDashboardRoute() {
           <PrincipalDashboardStatus
             icon={<Clock3 className="h-9 w-9" />}
             title="စောင့်ဆိုင်းနေပါသည်"
+            message={state.message}
+          />
+        )}
+
+        {state.status === "setup_pending" && (
+          <PrincipalDashboardStatus
+            icon={<Clock3 className="h-9 w-9" />}
+            title="Approved - Password Setup Pending"
             message={state.message}
           />
         )}

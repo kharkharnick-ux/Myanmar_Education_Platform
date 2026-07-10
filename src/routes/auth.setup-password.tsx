@@ -7,7 +7,10 @@ import {
   activateApprovedSchoolAdminRegistration,
   requestSchoolAdminPasswordSetupLink,
 } from "@/lib/api/school-admin-account.functions";
-import { getPrincipalDashboardAccess } from "@/lib/api/principal-account.functions";
+import {
+  activateApprovedPrincipalRegistration,
+  requestPrincipalPasswordSetupLink,
+} from "@/lib/api/principal-account.functions";
 
 const INVALID_PASSWORD_SETUP_LINK_MESSAGE =
   "Password setup link သက်တမ်းကုန်သွားပါသည် သို့မဟုတ် မမှန်ကန်ပါ။ Password setup link အသစ်တောင်းပါ။";
@@ -180,11 +183,11 @@ function SetupPasswordPage() {
       if (!session?.access_token)
         throw new Error("Unable to finalize approval. Please open the setup link again.");
 
-      const principalAccess = await getPrincipalDashboardAccess({
+      const principalActivation = await activateApprovedPrincipalRegistration({
         data: { accessToken: session.access_token },
       });
 
-      if (principalAccess.status === "approved") {
+      if (principalActivation.activated) {
         await supabase.auth.signOut();
         navigate({
           to: "/auth",
@@ -229,12 +232,30 @@ function SetupPasswordPage() {
 
     setResendLoading(true);
     try {
-      const result = await requestSchoolAdminPasswordSetupLink({
-        data: {
-          email: normalizedEmail,
-          nrcLast6: normalizedNrcLast6,
-        },
-      });
+      let result;
+
+      try {
+        result = await requestPrincipalPasswordSetupLink({
+          data: {
+            email: normalizedEmail,
+            nrcLast6: normalizedNrcLast6,
+          },
+        });
+      } catch (principalError) {
+        const principalErrorMessage =
+          principalError instanceof Error ? principalError.message : String(principalError);
+
+        if (!principalErrorMessage.includes("Approved Principal registration was not found")) {
+          throw principalError;
+        }
+
+        result = await requestSchoolAdminPasswordSetupLink({
+          data: {
+            email: normalizedEmail,
+            nrcLast6: normalizedNrcLast6,
+          },
+        });
+      }
 
       setResendMessage(result.message || "Password setup link အသစ်ကို email သို့ပို့ထားပါသည်။");
       setResendEmail(normalizedEmail);
@@ -260,7 +281,7 @@ function SetupPasswordPage() {
               Myanmar Education Platform
             </span>
             <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              School Admin Access
+              Account Access
             </span>
           </div>
         </Link>
@@ -272,7 +293,7 @@ function SetupPasswordPage() {
             </div>
             <h1 className="text-2xl font-bold glow-text">Set your password</h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              Activate your approved School Admin account for Myanmar Education Platform.
+              Activate your approved account for Myanmar Education Platform.
             </p>
           </div>
 
@@ -285,7 +306,7 @@ function SetupPasswordPage() {
                 Myanmar Education Platform invitation
               </div>
               <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                This secure setup link is for creating your School Admin password.
+                This secure setup link is for creating your account password.
               </p>
             </div>
           </div>

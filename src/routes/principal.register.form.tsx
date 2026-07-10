@@ -113,8 +113,8 @@ const fileLabels: Record<FileKey, string> = {
   profilePhoto: "Profile ဓာတ်ပုံ (ရှိပါက)",
   nrcFront: "NRC ရှေ့ဘက် *",
   nrcBack: "NRC နောက်ဘက် *",
-  degreeCertificate: "ပညာအရည်အချင်းလက်မှတ် *",
-  teachingLicense: "သင်ကြားခွင့် / လုပ်ငန်းလိုင်စင်လက်မှတ် *",
+  degreeCertificate: "ပညာအရည်အချင်းလက်မှတ် (ရှိပါက)",
+  teachingLicense: "သင်ကြားခွင့် / လုပ်ငန်းလိုင်စင်လက်မှတ် (ရှိပါက)",
 };
 
 const registrationSteps: Array<{ label: string; title: string; icon: LucideIcon }> = [
@@ -395,10 +395,12 @@ function PrincipalRegisterPage() {
     if (step === 2) {
       if (!files.nrcFront) errors.nrcFront = nrcFrontMessage;
       if (!files.nrcBack) errors.nrcBack = nrcBackMessage;
-      if (!files.degreeCertificate) errors.degreeCertificate = degreeCertificateMessage;
-      else if (!isPdfFile(files.degreeCertificate)) errors.degreeCertificate = pdfFileMessage;
-      if (!files.teachingLicense) errors.teachingLicense = teachingLicenseMessage;
-      else if (!isPdfFile(files.teachingLicense)) errors.teachingLicense = pdfFileMessage;
+      if (files.degreeCertificate && !isPdfFile(files.degreeCertificate)) {
+        errors.degreeCertificate = pdfFileMessage;
+      }
+      if (files.teachingLicense && !isPdfFile(files.teachingLicense)) {
+        errors.teachingLicense = pdfFileMessage;
+      }
     }
 
     if (step === 3) {
@@ -544,7 +546,7 @@ function PrincipalRegisterPage() {
       const degreeCertificateUrl = uploadedPaths.degreeCertificate || null;
       const teachingLicenseUrl = uploadedPaths.teachingLicense || null;
 
-      if (!nrcFrontUrl || !nrcBackUrl || !degreeCertificateUrl || !teachingLicenseUrl) {
+      if (!nrcFrontUrl || !nrcBackUrl) {
         throw new Error("Required documents are missing.");
       }
 
@@ -903,7 +905,7 @@ function PrincipalRegisterPage() {
             <FormSection
               icon={FileText}
               title="လိုအပ်သောစာရွက်စာတမ်းများ"
-              description="အချက်အလက်စစ်ဆေးနိုင်ရန် NRC ရှေ့ဘက်၊ NRC နောက်ဘက်၊ ပညာအရည်အချင်းလက်မှတ်နှင့် သင်ကြားခွင့် / လုပ်ငန်းလိုင်စင်လက်မှတ်ကို မဖြစ်မနေ တင်ပါ။ လက်မှတ် ၂ ခုကို PDF file အဖြစ်သာ တင်ပါ။"
+              description="NRC ရှေ့ဘက်နှင့် NRC နောက်ဘက်ကို မဖြစ်မနေ တင်ပါ။ ပညာအရည်အချင်းလက်မှတ်နှင့် သင်ကြားခွင့် / လုပ်ငန်းလိုင်စင်လက်မှတ် ရှိပါက PDF file အဖြစ် တင်နိုင်ပါသည်။"
             >
               {(
                 [
@@ -991,15 +993,11 @@ function PrincipalRegisterPage() {
                     />
                     <DocumentStatusRow
                       label="ပညာအရည်အချင်းလက်မှတ်"
-                      status={requiredUploadStatus(files.degreeCertificate)}
-                      required
-                      uploaded={Boolean(files.degreeCertificate)}
+                      status={uploadedStatus(files.degreeCertificate)}
                     />
                     <DocumentStatusRow
                       label="သင်ကြားခွင့် / လုပ်ငန်းလိုင်စင်လက်မှတ်"
-                      status={requiredUploadStatus(files.teachingLicense)}
-                      required
-                      uploaded={Boolean(files.teachingLicense)}
+                      status={uploadedStatus(files.teachingLicense)}
                     />
                   </ReviewCard>
                 </div>
