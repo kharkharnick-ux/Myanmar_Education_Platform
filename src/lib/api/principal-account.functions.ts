@@ -22,6 +22,32 @@ const createPrincipalRegistrationUploadUrlsSchema = z.object({
   files: z.array(principalRegistrationUploadFileSchema).min(1).max(5),
 });
 
+const savePrincipalRegistrationDraftSchema = z.object({
+  token: z.string().min(16),
+  step: z.number().int().min(1).max(4),
+  fullNameMm: z.string().optional(),
+  fullNameEn: z.string().optional(),
+  phone: z.string().optional(),
+  dateOfBirth: z.string().optional(),
+  gender: z.string().optional(),
+  nrcNumber: z.string().optional(),
+  residentialAddress: z.string().optional(),
+  stateRegionId: z.number().int().nullable().optional(),
+  townshipId: z.number().int().nullable().optional(),
+  highestEducation: z.string().optional(),
+  major: z.string().optional(),
+  yearsOfTeachingExperience: z.number().int().min(0).optional(),
+  yearsOfManagementExperience: z.number().int().min(0).optional(),
+  previousSchool: z.string().nullable().optional(),
+  currentPosition: z.string().optional(),
+  profilePhotoUrl: z.string().nullable().optional(),
+  nrcFrontUrl: z.string().nullable().optional(),
+  nrcBackUrl: z.string().nullable().optional(),
+  degreeCertificateUrl: z.string().nullable().optional(),
+  teachingLicenseUrl: z.string().nullable().optional(),
+  reachedReviewStep: z.boolean().optional(),
+});
+
 const submitPrincipalRegistrationSchema = z.object({
   token: z.string().min(16),
   fullNameMm: z.string().min(1),
@@ -83,6 +109,15 @@ const reviewPrincipalSchema = z.object({
   rejectionReason: z.string().optional(),
 });
 
+const principalRequestActionSchema = z.object({
+  accessToken: z.string().min(1).optional(),
+  requestId: z.string().uuid(),
+});
+
+const cancelPrincipalInvitationSchema = principalRequestActionSchema.extend({
+  reason: z.string().optional(),
+});
+
 type SupabaseAdmin = Awaited<
   typeof import("@/integrations/supabase/client.server")
 >["supabaseAdmin"];
@@ -107,7 +142,7 @@ type SchoolRow = {
 type PrincipalRequestRow = {
   id: string;
   request_type: string;
-  status: "invited" | "pending" | "approved" | "rejected";
+  status: "invited" | "draft" | "pending" | "approved" | "rejected" | "cancelled";
   email: string;
   phone: string | null;
   full_name_mm: string | null;
@@ -128,6 +163,15 @@ type PrincipalRequestRow = {
   reviewed_by: string | null;
   reviewed_at: string | null;
   rejection_reason: string | null;
+  current_step?: number | null;
+  draft_saved_at?: string | null;
+  submitted_at?: string | null;
+  final_confirmed_at?: string | null;
+  cancelled_at?: string | null;
+  cancelled_by?: string | null;
+  cancellation_reason?: string | null;
+  invite_resent_at?: string | null;
+  invite_resent_count?: number | null;
   invite_note?: string | null;
   highest_education?: string | null;
   major?: string | null;
@@ -191,6 +235,8 @@ const PRINCIPAL_PENDING_APPROVAL_MESSAGE =
   "သင့် Principal registration ကို School Admin မှ စစ်ဆေးအတည်ပြုရန် စောင့်ဆိုင်းနေပါသည်။";
 const PRINCIPAL_LOGIN_SETUP_PENDING_MESSAGE =
   "Principal registration အတည်ပြုပြီးပါပြီ။ Login setup link မှ password သတ်မှတ်ပြီးမှ Principal account ကို active ပြုလုပ်ပါမည်။";
+const ACTIVE_PRINCIPAL_INVITE_EXISTS_MESSAGE =
+  "ဤကျောင်းအတွက် Principal invitation တစ်ခုရှိပြီးသားဖြစ်ပါသည်။ အသစ်ပို့လိုပါက အရင် invitation ကို Cancel လုပ်ပါ။";
 
 type PrincipalServerErrorContext = {
   queryName: string;
@@ -265,6 +311,15 @@ const principalManagementRequestSelect = [
   "approved_profile_id",
   "approved_school_id",
   "reviewed_at",
+  "current_step",
+  "draft_saved_at",
+  "submitted_at",
+  "final_confirmed_at",
+  "cancelled_at",
+  "cancelled_by",
+  "cancellation_reason",
+  "invite_resent_at",
+  "invite_resent_count",
   "created_at",
   "updated_at",
 ].join(", ");
@@ -280,6 +335,8 @@ type PrincipalManagementRequestForFiltering = {
   gender?: string | null;
   nrc_number?: string | null;
   residential_address?: string | null;
+  state_region_id?: number | null;
+  township_id?: number | null;
   highest_education?: string | null;
   years_of_teaching_experience?: number | null;
   years_of_management_experience?: number | null;
@@ -287,14 +344,36 @@ type PrincipalManagementRequestForFiltering = {
   nrc_back_url?: string | null;
   approved_profile_id?: string | null;
   approved_school_id?: string | null;
+  current_step?: number | null;
+  draft_saved_at?: string | null;
+  submitted_at?: string | null;
+  final_confirmed_at?: string | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
+  invite_resent_at?: string | null;
+  invite_resent_count?: number | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
 
 const actionablePrincipalRequestStatuses = new Set<PrincipalRequestRow["status"]>([
   "invited",
+  "draft",
   "pending",
 ]);
+
+const activePrincipalFlowStatuses: PrincipalRequestRow["status"][] = [
+  "invited",
+  "draft",
+  "pending",
+  "approved",
+];
+
+const cancellablePrincipalStatuses: PrincipalRequestRow["status"][] = [
+  "invited",
+  "draft",
+  "pending",
+];
 
 const getPrincipalRequestTimestamp = (request: PrincipalManagementRequestForFiltering) => {
   const timestamp = Date.parse(request.updated_at || request.created_at || "");
@@ -321,6 +400,10 @@ const hasPrincipalCompletedSubmissionData = (request: PrincipalManagementRequest
       request.gender?.trim() &&
       request.nrc_number?.trim() &&
       request.residential_address?.trim() &&
+      request.state_region_id !== null &&
+      request.state_region_id !== undefined &&
+      request.township_id !== null &&
+      request.township_id !== undefined &&
       request.highest_education?.trim() &&
       request.years_of_teaching_experience !== null &&
       request.years_of_teaching_experience !== undefined &&
@@ -329,11 +412,15 @@ const hasPrincipalCompletedSubmissionData = (request: PrincipalManagementRequest
       request.years_of_management_experience !== undefined &&
       request.years_of_management_experience >= 0 &&
       request.nrc_front_url?.trim() &&
-      request.nrc_back_url?.trim(),
+      request.nrc_back_url?.trim() &&
+      request.degree_certificate_url?.trim() &&
+      request.teaching_license_url?.trim(),
   );
 
 const isPrincipalRequestVisibleInManagement = (request: PrincipalManagementRequestForFiltering) => {
-  if (request.status === "pending") return hasPrincipalCompletedSubmissionData(request);
+  if (request.status === "pending") {
+    return Boolean(request.final_confirmed_at) && hasPrincipalCompletedSubmissionData(request);
+  }
   return true;
 };
 
@@ -377,10 +464,13 @@ const filterCurrentActionablePrincipalRequests = <T extends PrincipalManagementR
     const latestPendingRequest = duplicateRequests
       .filter((request) => request.status === "pending")
       .sort(sortPrincipalRequestsNewestFirst)[0];
+    const latestDraftRequest = duplicateRequests
+      .filter((request) => request.status === "draft")
+      .sort(sortPrincipalRequestsNewestFirst)[0];
     const latestInvitedRequest = duplicateRequests
       .filter((request) => request.status === "invited")
       .sort(sortPrincipalRequestsNewestFirst)[0];
-    const currentActionableRequest = latestPendingRequest || latestInvitedRequest;
+    const currentActionableRequest = latestPendingRequest || latestDraftRequest || latestInvitedRequest;
 
     filteredRequests.push(...finalRequests);
     if (currentActionableRequest) filteredRequests.push(currentActionableRequest);
@@ -864,8 +954,23 @@ const fetchValidPrincipalInvite = async (supabaseAdmin: SupabaseAdmin, token: st
   if (!request) throw new Error("Principal invite link is invalid.");
 
   const principalRequest = request as PrincipalRequestRow;
-  if (principalRequest.status !== "invited") {
-    throw new Error("Principal invite link has already been used or reviewed.");
+  if (principalRequest.status === "cancelled") {
+    throw new Error("ဤ invitation ကို ပယ်ဖျက်ထားပါသည်။ School Admin ကို ဆက်သွယ်ပါ။");
+  }
+  if (principalRequest.status === "pending") {
+    throw new Error("သင့် registration ကို School Admin စစ်ဆေးနေပါသည်။");
+  }
+  if (principalRequest.status === "approved") {
+    throw new Error("သင့် registration ကို approved လုပ်ပြီးပါပြီ။ Password setup link ကိုစစ်ပါ။");
+  }
+  if (principalRequest.status === "rejected") {
+    throw new Error(
+      principalRequest.rejection_reason ||
+        "သင့် Principal registration ကို ငြင်းပယ်ထားပါသည်။ School Admin ကို ဆက်သွယ်ပါ။",
+    );
+  }
+  if (principalRequest.status !== "invited" && principalRequest.status !== "draft") {
+    throw new Error("Principal invite link is no longer available.");
   }
 
   if (
@@ -879,6 +984,37 @@ const fetchValidPrincipalInvite = async (supabaseAdmin: SupabaseAdmin, token: st
 
   return principalRequest;
 };
+
+const buildPrincipalDraftResponse = (principalRequest: PrincipalRequestRow) => ({
+  id: principalRequest.id,
+  email: principalRequest.email,
+  note: principalRequest.invite_note || "",
+  status: principalRequest.status,
+  currentStep: principalRequest.current_step || 0,
+  draftSavedAt: principalRequest.draft_saved_at || null,
+  fields: {
+    fullNameMm: principalRequest.full_name_mm || "",
+    fullNameEn: principalRequest.full_name_en || "",
+    phone: principalRequest.phone || "",
+    dateOfBirth: principalRequest.date_of_birth || "",
+    gender: principalRequest.gender || "",
+    nrcNumber: principalRequest.nrc_number || "",
+    residentialAddress: principalRequest.residential_address || "",
+    stateRegionId: principalRequest.state_region_id,
+    townshipId: principalRequest.township_id,
+    highestEducation: principalRequest.highest_education || "",
+    major: principalRequest.major || "",
+    yearsOfTeachingExperience: principalRequest.years_of_teaching_experience,
+    yearsOfManagementExperience: principalRequest.years_of_management_experience,
+    previousSchool: principalRequest.previous_school || "",
+    currentPosition: principalRequest.current_position || "",
+    profilePhotoUrl: principalRequest.profile_photo_url || null,
+    nrcFrontUrl: principalRequest.nrc_front_url || null,
+    nrcBackUrl: principalRequest.nrc_back_url || null,
+    degreeCertificateUrl: principalRequest.degree_certificate_url || null,
+    teachingLicenseUrl: principalRequest.teaching_license_url || null,
+  },
+});
 
 const findAuthUserByEmail = async (supabaseAdmin: SupabaseAdmin, email: string) => {
   const normalizedEmail = normalizeEmail(email);
@@ -1076,6 +1212,100 @@ export const invitePrincipal = createServerFn({ method: "POST" })
         schoolRecordExists: Boolean(school),
       });
 
+      const { data: activeRequestRows, error: activeRequestError } = await supabaseAdmin
+        .from("registration_requests")
+        .select("id, email, status, invite_token, invite_resent_count")
+        .eq("request_type", "principal")
+        .eq("approved_school_id", school.id)
+        .in("status", activePrincipalFlowStatuses)
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      if (activeRequestError) throw activeRequestError;
+
+      const activeRequest = ((activeRequestRows || []) as PrincipalRequestRow[])[0] || null;
+      if (activeRequest) {
+        const activeRequestEmail = normalizeEmail(activeRequest.email);
+        const canResendExistingInvite =
+          activeRequestEmail === normalizedEmail &&
+          (activeRequest.status === "invited" || activeRequest.status === "draft");
+
+        if (!canResendExistingInvite) {
+          console.info("[Principal invite] Active principal flow blocks new invite", {
+            schoolId: school.id,
+            existingRequestId: activeRequest.id,
+            existingStatus: activeRequest.status,
+            existingEmail: activeRequestEmail,
+            requestedEmail: normalizedEmail,
+          });
+          throw new Error(ACTIVE_PRINCIPAL_INVITE_EXISTS_MESSAGE);
+        }
+
+        const resendToken = activeRequest.invite_token || token;
+        const resentCount = Number(activeRequest.invite_resent_count || 0) + 1;
+        const { data: resentRequest, error: resendUpdateError } = await supabaseAdmin
+          .from("registration_requests")
+          .update({
+            invite_token: resendToken,
+            invite_token_expires_at: expiresAt,
+            invite_note: data.note?.trim() || null,
+            invite_resent_at: new Date().toISOString(),
+            invite_resent_count: resentCount,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", activeRequest.id)
+          .eq("request_type", "principal")
+          .eq("approved_school_id", school.id)
+          .in("status", ["invited", "draft"])
+          .select("id")
+          .maybeSingle();
+
+        if (resendUpdateError) throw resendUpdateError;
+        if (!resentRequest) throw new Error("Principal invitation is no longer available.");
+
+        const emailConfig = getPrincipalInviteEmailJSConfig();
+        const inviteUrl = await getPrincipalInviteUrl(resendToken);
+
+        console.info("[Principal invite] Resending existing invite", {
+          requestId: activeRequest.id,
+          schoolId: school.id,
+          invitedEmail: normalizedEmail,
+          statusBefore: activeRequest.status,
+          resendCount: resentCount,
+        });
+
+        if (emailConfig.mode === "manual") {
+          return {
+            ok: true,
+            requestId: activeRequest.id,
+            email: normalizedEmail,
+            emailSent: false,
+            manualMode: true,
+            inviteUrl,
+            message: "EmailJS is not configured in development. Use the manual invite link below.",
+          };
+        }
+
+        await sendPrincipalInviteEmailWithEmailJS({
+          config: emailConfig,
+          principalEmail: normalizedEmail,
+          schoolName: school.school_name,
+          schoolAdminName: profile.full_name?.trim() || user.email || "School Admin",
+          schoolAdminEmail: normalizeEmail(profile.email || user.email || ""),
+          inviteUrl,
+          note: data.note,
+        });
+
+        return {
+          ok: true,
+          requestId: activeRequest.id,
+          email: normalizedEmail,
+          emailSent: true,
+          manualMode: false,
+          message: `Principal invite email sent to ${normalizedEmail}.`,
+        };
+      }
+
       const { data: targetProfile, error: targetProfileError } = await supabaseAdmin
         .from("profiles")
         .select("id, role, email")
@@ -1109,10 +1339,13 @@ export const invitePrincipal = createServerFn({ method: "POST" })
 
       const { data: existingActivePrincipal, error: activePrincipalError } = await supabaseAdmin
         .from("teachers")
-        .select("id, profile_id")
+        .select("id, profile_id, status")
         .eq("school_id", school.id)
         .eq("level", "principal")
-        .eq("status", PRINCIPAL_TEACHER_ACTIVE_STATUS)
+        .in("status", [
+          PRINCIPAL_TEACHER_ACTIVE_STATUS,
+          PRINCIPAL_TEACHER_PENDING_PASSWORD_STATUS,
+        ])
         .limit(1)
         .maybeSingle();
 
@@ -1145,7 +1378,7 @@ export const invitePrincipal = createServerFn({ method: "POST" })
         existingActivePrincipalProfile?.role === "principal" &&
         existingActivePrincipalProfile.status === PRINCIPAL_TEACHER_ACTIVE_STATUS
       ) {
-        throw new Error("This school already has an active Principal.");
+        throw new Error(ACTIVE_PRINCIPAL_INVITE_EXISTS_MESSAGE);
       }
 
       const emailConfig = getPrincipalInviteEmailJSConfig();
@@ -1161,14 +1394,15 @@ export const invitePrincipal = createServerFn({ method: "POST" })
         gender: null,
         nrc_number: null,
         residential_address: null,
-        state_region_id: school.region_id || null,
-        township_id: school.township_id || null,
+        state_region_id: null,
+        township_id: null,
         nrc_front_url: null,
         nrc_back_url: null,
         approved_school_id: school.id,
         invited_by: user.id,
         invite_token: token,
         invite_token_expires_at: expiresAt,
+        current_step: 0,
         invite_note: data.note?.trim() || null,
         school_name: school.school_name,
         school_type: school.school_type,
@@ -1201,6 +1435,14 @@ export const invitePrincipal = createServerFn({ method: "POST" })
         console.error("[Principal invite debug] registration_requests insert error", error);
         throw new Error(error.message || "Unable to create the Principal invite request.");
       }
+
+      console.info("[Principal invite] Created registration_requests invite", {
+        requestId: request?.id,
+        schoolId: school.id,
+        invitedEmail: normalizedEmail,
+        statusAfter: "invited",
+        currentStep: 0,
+      });
 
       const inviteUrl = await getPrincipalInviteUrl(token);
       if (emailConfig.mode === "manual") {
@@ -1241,6 +1483,134 @@ export const invitePrincipal = createServerFn({ method: "POST" })
       });
       throw error;
     }
+  });
+
+export const resendPrincipalInvite = createServerFn({ method: "POST" })
+  .validator(principalRequestActionSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { user, profile, school } = await getSchoolAdminContext(
+      supabaseAdmin,
+      data.accessToken,
+    );
+    const now = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString();
+    const request = await fetchPrincipalRequestForSchool(supabaseAdmin, data.requestId, school.id);
+
+    if (request.status !== "invited" && request.status !== "draft") {
+      throw new Error("Only invited or draft Principal requests can be resent.");
+    }
+
+    const inviteToken = request.invite_token || createInviteToken();
+    const resendCount = Number(request.invite_resent_count || 0) + 1;
+    const { data: updatedRequest, error: updateError } = await supabaseAdmin
+      .from("registration_requests")
+      .update({
+        invite_token: inviteToken,
+        invite_token_expires_at: expiresAt,
+        invite_resent_at: now,
+        invite_resent_count: resendCount,
+        updated_at: now,
+      })
+      .eq("id", request.id)
+      .eq("request_type", "principal")
+      .eq("approved_school_id", school.id)
+      .in("status", ["invited", "draft"])
+      .select("id")
+      .maybeSingle();
+
+    if (updateError) throw updateError;
+    if (!updatedRequest) throw new Error("Principal invitation is no longer available.");
+
+    const emailConfig = getPrincipalInviteEmailJSConfig();
+    const inviteUrl = await getPrincipalInviteUrl(inviteToken);
+    const normalizedEmail = normalizeEmail(request.email);
+
+    console.info("[Principal invite] Resend requested", {
+      requestId: request.id,
+      schoolId: school.id,
+      invitedEmail: normalizedEmail,
+      statusBefore: request.status,
+      resendCount,
+    });
+
+    if (emailConfig.mode === "manual") {
+      return {
+        ok: true,
+        requestId: request.id,
+        email: normalizedEmail,
+        emailSent: false,
+        manualMode: true,
+        inviteUrl,
+        message: "EmailJS is not configured in development. Use the manual invite link below.",
+      };
+    }
+
+    await sendPrincipalInviteEmailWithEmailJS({
+      config: emailConfig,
+      principalEmail: normalizedEmail,
+      schoolName: school.school_name,
+      schoolAdminName: profile.full_name?.trim() || user.email || "School Admin",
+      schoolAdminEmail: normalizeEmail(profile.email || user.email || ""),
+      inviteUrl,
+      note: request.invite_note,
+    });
+
+    return {
+      ok: true,
+      requestId: request.id,
+      email: normalizedEmail,
+      emailSent: true,
+      manualMode: false,
+      message: `Principal invite email sent to ${normalizedEmail}.`,
+    };
+  });
+
+export const cancelPrincipalInvitation = createServerFn({ method: "POST" })
+  .validator(cancelPrincipalInvitationSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { user, school } = await getSchoolAdminContext(supabaseAdmin, data.accessToken);
+    const request = await fetchPrincipalRequestForSchool(supabaseAdmin, data.requestId, school.id);
+
+    if (!cancellablePrincipalStatuses.includes(request.status)) {
+      throw new Error("Only invited, draft, or pending Principal requests can be cancelled.");
+    }
+
+    const now = new Date().toISOString();
+    const { data: updatedRequest, error } = await supabaseAdmin
+      .from("registration_requests")
+      .update({
+        status: "cancelled",
+        cancelled_at: now,
+        cancelled_by: user.id,
+        cancellation_reason: data.reason?.trim() || null,
+        updated_at: now,
+      })
+      .eq("id", request.id)
+      .eq("request_type", "principal")
+      .eq("approved_school_id", school.id)
+      .in("status", cancellablePrincipalStatuses)
+      .select("id")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!updatedRequest) throw new Error("Principal invitation is no longer available.");
+
+    console.info("[Principal invite] Cancelled request", {
+      requestId: request.id,
+      schoolId: school.id,
+      invitedEmail: normalizeEmail(request.email),
+      statusBefore: request.status,
+      statusAfter: "cancelled",
+      currentStep: request.current_step || 0,
+    });
+
+    return {
+      ok: true,
+      requestId: request.id,
+      message: "Principal invitation has been cancelled.",
+    };
   });
 
 export const getPrincipalManagementData = createServerFn({ method: "POST" })
@@ -1646,6 +2016,14 @@ export const getPrincipalDashboardAccess = createServerFn({ method: "POST" })
       };
     }
 
+    if (request?.status === "cancelled") {
+      return {
+        ok: true,
+        status: "rejected" as const,
+        message: "ဤ Principal invitation ကို ပယ်ဖျက်ထားပါသည်။ School Admin ကို ဆက်သွယ်ပါ။",
+      };
+    }
+
     if (request?.status === "approved" || profile?.role === "principal") {
       return {
         ok: true,
@@ -1996,11 +2374,7 @@ export const getPrincipalInvite = createServerFn({ method: "POST" })
 
     return {
       ok: true,
-      request: {
-        id: principalRequest.id,
-        email: principalRequest.email,
-        note: principalRequest.invite_note || "",
-      },
+      request: buildPrincipalDraftResponse(principalRequest),
       school: toPublicSchool(school as SchoolRow),
     };
   });
@@ -2057,12 +2431,118 @@ export const createPrincipalRegistrationUploadUrls = createServerFn({ method: "P
     };
   });
 
+export const savePrincipalRegistrationDraft = createServerFn({ method: "POST" })
+  .validator(savePrincipalRegistrationDraftSchema)
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const invite = await fetchValidPrincipalInvite(supabaseAdmin, data.token);
+    const now = new Date().toISOString();
+    const nextCurrentStep = Math.max(
+      invite.current_step || 0,
+      data.reachedReviewStep ? 4 : data.step,
+    );
+    const payload: Record<string, unknown> = {
+      status: "draft",
+      current_step: nextCurrentStep,
+      draft_saved_at: now,
+      updated_at: now,
+    };
+    const assignIfDefined = (column: string, value: unknown) => {
+      if (value !== undefined) payload[column] = value;
+    };
+
+    if (data.step === 1) {
+      assignIfDefined("full_name_mm", data.fullNameMm?.trim());
+      assignIfDefined("full_name_en", data.fullNameEn?.trim());
+      assignIfDefined("phone", data.phone?.trim());
+      assignIfDefined("date_of_birth", data.dateOfBirth || null);
+      assignIfDefined("gender", data.gender || null);
+      assignIfDefined("nrc_number", data.nrcNumber?.trim());
+      assignIfDefined("residential_address", data.residentialAddress?.trim());
+      assignIfDefined("state_region_id", data.stateRegionId ?? null);
+      assignIfDefined("township_id", data.townshipId ?? null);
+    }
+
+    if (data.step === 2) {
+      assignIfDefined("highest_education", data.highestEducation?.trim());
+      assignIfDefined("major", data.major?.trim() || null);
+      assignIfDefined("years_of_teaching_experience", data.yearsOfTeachingExperience);
+      assignIfDefined("years_of_management_experience", data.yearsOfManagementExperience);
+      assignIfDefined("previous_school", data.previousSchool?.trim() || null);
+      assignIfDefined("current_position", data.currentPosition?.trim() || null);
+    }
+
+    if (data.step === 3) {
+      assignIfDefined("profile_photo_url", data.profilePhotoUrl);
+      assignIfDefined("nrc_front_url", data.nrcFrontUrl);
+      assignIfDefined("nrc_back_url", data.nrcBackUrl);
+      assignIfDefined("degree_certificate_url", data.degreeCertificateUrl);
+      assignIfDefined("teaching_license_url", data.teachingLicenseUrl);
+    }
+
+    const { data: updatedRequest, error } = await supabaseAdmin
+      .from("registration_requests")
+      .update(payload)
+      .eq("id", invite.id)
+      .eq("request_type", "principal")
+      .in("status", ["invited", "draft"])
+      .select("id, status, current_step, draft_saved_at")
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!updatedRequest) throw new Error("Principal invite is no longer available.");
+
+    console.info("[Principal registration draft] Saved draft", {
+      requestId: invite.id,
+      schoolId: invite.approved_school_id,
+      invitedEmail: normalizeEmail(invite.email),
+      statusBefore: invite.status,
+      statusAfter: "draft",
+      currentStep: nextCurrentStep,
+    });
+
+    return {
+      ok: true,
+      request: updatedRequest,
+    };
+  });
+
 export const submitPrincipalRegistration = createServerFn({ method: "POST" })
   .validator(submitPrincipalRegistrationSchema)
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const invite = await fetchValidPrincipalInvite(supabaseAdmin, data.token);
     const now = new Date().toISOString();
+    const missingFields = [
+      ["email", invite.email],
+      ["full_name_mm", data.fullNameMm],
+      ["full_name_en", data.fullNameEn],
+      ["phone", data.phone],
+      ["date_of_birth", data.dateOfBirth],
+      ["gender", data.gender],
+      ["nrc_number", data.nrcNumber],
+      ["residential_address", data.residentialAddress],
+      ["state_region_id", data.stateRegionId],
+      ["township_id", data.townshipId],
+      ["highest_education", data.highestEducation],
+      ["years_of_teaching_experience", data.yearsOfTeachingExperience],
+      ["years_of_management_experience", data.yearsOfManagementExperience],
+      ["nrc_front_url", data.nrcFrontUrl],
+      ["nrc_back_url", data.nrcBackUrl],
+      ["degree_certificate_url", data.degreeCertificateUrl],
+      ["teaching_license_url", data.teachingLicenseUrl],
+    ].filter(([, value]) => value === null || value === undefined || String(value).trim() === "");
+
+    if (missingFields.length > 0) {
+      console.warn("[Principal registration submit] Final validation failed", {
+        requestId: invite.id,
+        schoolId: invite.approved_school_id,
+        invitedEmail: normalizeEmail(invite.email),
+        missingFields: missingFields.map(([field]) => field),
+        currentStep: invite.current_step || 0,
+      });
+      throw new Error("Principal registration information is incomplete.");
+    }
 
     const { data: updatedRequest, error } = await supabaseAdmin
       .from("registration_requests")
@@ -2094,16 +2574,30 @@ export const submitPrincipalRegistration = createServerFn({ method: "POST" })
         emergency_contact_name: data.emergencyContactName,
         emergency_contact_relationship: data.emergencyContactRelationship,
         emergency_contact_phone: data.emergencyContactPhone,
+        current_step: 4,
+        submitted_at: now,
+        final_confirmed_at: now,
+        draft_saved_at: now,
         updated_at: now,
       })
       .eq("id", invite.id)
       .eq("request_type", "principal")
-      .eq("status", "invited")
+      .in("status", ["invited", "draft"])
       .select("id")
       .maybeSingle();
 
     if (error) throw error;
     if (!updatedRequest) throw new Error("Principal invite is no longer available.");
+
+    console.info("[Principal registration submit] Final submit completed", {
+      requestId: invite.id,
+      schoolId: invite.approved_school_id,
+      invitedEmail: normalizeEmail(invite.email),
+      statusBefore: invite.status,
+      statusAfter: "pending",
+      currentStep: 4,
+      validationPassed: true,
+    });
 
     return {
       ok: true,
@@ -2148,12 +2642,13 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       return { ok: true };
     }
 
-    if (!hasPrincipalCompletedSubmissionData(request)) {
+    if (!request.final_confirmed_at || !hasPrincipalCompletedSubmissionData(request)) {
       console.warn("[Principal approval] Incomplete principal request cannot be approved", {
         selectedRequestId: request.id,
         requestEmail: normalizedEmail,
         schoolId: requestSchoolId,
         approvalStatusBefore: request.status,
+        hasFinalConfirmation: Boolean(request.final_confirmed_at),
       });
       throw new Error("Principal registration is incomplete and cannot be approved.");
     }

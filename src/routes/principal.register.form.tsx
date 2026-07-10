@@ -29,6 +29,7 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   createPrincipalRegistrationUploadUrls,
   getPrincipalInvite,
+  savePrincipalRegistrationDraft,
   submitPrincipalRegistration,
 } from "@/lib/api/principal-account.functions";
 import { cn } from "@/lib/utils";
@@ -38,7 +39,34 @@ type InviteState =
   | { status: "error"; message: string }
   | {
       status: "ready";
-      request: { id: string; email: string; note: string };
+      request: {
+        id: string;
+        email: string;
+        note: string;
+        status?: string;
+        currentStep?: number;
+        draftSavedAt?: string | null;
+        fields?: {
+          fullNameMm?: string;
+          fullNameEn?: string;
+          phone?: string;
+          dateOfBirth?: string;
+          gender?: string;
+          nrcNumber?: string;
+          residentialAddress?: string;
+          stateRegionId?: number | null;
+          townshipId?: number | null;
+          highestEducation?: string;
+          yearsOfTeachingExperience?: number | null;
+          yearsOfManagementExperience?: number | null;
+          previousSchool?: string;
+          profilePhotoUrl?: string | null;
+          nrcFrontUrl?: string | null;
+          nrcBackUrl?: string | null;
+          degreeCertificateUrl?: string | null;
+          teachingLicenseUrl?: string | null;
+        };
+      };
       school: {
         id: string;
         name: string;
@@ -164,6 +192,16 @@ const sanitizeEnglishName = (value: string) => value.replace(/[^A-Za-z\s.'-]/g, 
 const sanitizeNrcNumber = (value: string) => value.replace(/[^0-9\u1040-\u1049]/g, "").slice(0, 6);
 const toEnDigit = (value: string) =>
   value.replace(/[\u1040-\u1049]/g, (digit) => String(digit.charCodeAt(0) - 0x1040));
+const splitStoredNrcNumber = (value = "") => {
+  const match = value.match(/^(\d+)\/(.+)\(([^)]+)\)(\d{6})$/);
+  if (!match) return { nrcState: "", nrcTownship: "", nrcType: "", nrcNumberRaw: "" };
+  return {
+    nrcState: match[1],
+    nrcTownship: match[2],
+    nrcType: match[3],
+    nrcNumberRaw: match[4],
+  };
+};
 const isMyanmarName = (value: string) => /^[\u1000-\u109f\uaa60-\uaa7f\s]+$/u.test(value.trim());
 const isEnglishName = (value: string) => /^[A-Za-z][A-Za-z\s.'-]*$/u.test(value.trim());
 const countDigits = (value: string) => toEnDigit(value).replace(/\D/g, "").length;
@@ -195,6 +233,7 @@ function PrincipalRegisterPage() {
   const [currentStep, setCurrentStep] = useState(0);
   const [values, setValues] = useState<FormValues>(initialFormValues);
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({});
+  const [savedDocumentPaths, setSavedDocumentPaths] = useState<Partial<Record<FileKey, string>>>({});
   const [regions, setRegions] = useState<RegionOption[]>([]);
   const [townships, setTownships] = useState<TownshipOption[]>([]);
   const [nrcTownships, setNrcTownships] = useState<TownshipOption[]>([]);
@@ -224,6 +263,44 @@ function PrincipalRegisterPage() {
           request: result.request,
           school: result.school,
         });
+        const draftFields = result.request.fields || {};
+        const parsedNrc = splitStoredNrcNumber(draftFields.nrcNumber || "");
+        setValues({
+          ...initialFormValues,
+          fullNameMm: draftFields.fullNameMm || "",
+          fullNameEn: draftFields.fullNameEn || "",
+          phone: draftFields.phone || "",
+          dateOfBirth: draftFields.dateOfBirth || "",
+          gender: draftFields.gender || "",
+          nrcState: parsedNrc.nrcState,
+          nrcTownship: parsedNrc.nrcTownship,
+          nrcType: parsedNrc.nrcType,
+          nrcNumberRaw: parsedNrc.nrcNumberRaw,
+          residentialAddress: draftFields.residentialAddress || "",
+          stateRegionId: draftFields.stateRegionId ? String(draftFields.stateRegionId) : "",
+          townshipId: draftFields.townshipId ? String(draftFields.townshipId) : "",
+          highestEducation: draftFields.highestEducation || "",
+          yearsOfTeachingExperience:
+            draftFields.yearsOfTeachingExperience === null ||
+            draftFields.yearsOfTeachingExperience === undefined
+              ? "0"
+              : String(draftFields.yearsOfTeachingExperience),
+          yearsOfManagementExperience:
+            draftFields.yearsOfManagementExperience === null ||
+            draftFields.yearsOfManagementExperience === undefined
+              ? "0"
+              : String(draftFields.yearsOfManagementExperience),
+          previousSchool: draftFields.previousSchool || "",
+          declarationAccepted: false,
+        });
+        setSavedDocumentPaths({
+          profilePhoto: draftFields.profilePhotoUrl || undefined,
+          nrcFront: draftFields.nrcFrontUrl || undefined,
+          nrcBack: draftFields.nrcBackUrl || undefined,
+          degreeCertificate: draftFields.degreeCertificateUrl || undefined,
+          teachingLicense: draftFields.teachingLicenseUrl || undefined,
+        });
+        setCurrentStep(Math.min(Math.max(result.request.currentStep || 0, 0), lastRegistrationStepIndex));
       } catch (error) {
         setInvite({
           status: "error",
@@ -276,7 +353,7 @@ function PrincipalRegisterPage() {
   }, [values.nrcState]);
 
   const selectedNrcTownship = nrcTownships.find(
-    (township) => township.name === values.nrcTownship,
+    (township) => township.name === values.nrcTownship || township.nrc_code === values.nrcTownship,
   );
   const nrcTownshipCode = selectedNrcTownship?.nrc_code || values.nrcTownship;
   const fullNrcNumber =
@@ -320,6 +397,14 @@ function PrincipalRegisterPage() {
       }
       return next;
     });
+    if (!file) {
+      setSavedDocumentPaths((current) => {
+        if (!current[key]) return current;
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+    }
     clearFieldError(key);
     setSubmitError("");
   };
@@ -360,6 +445,7 @@ function PrincipalRegisterPage() {
 
   const validateStep = (step: number): FieldErrors => {
     const errors: FieldErrors = {};
+    const hasDocument = (key: FileKey) => Boolean(files[key] || savedDocumentPaths[key]);
 
     if (step === 0) {
       if (!values.fullNameMm.trim()) errors.fullNameMm = requiredMessage;
@@ -380,6 +466,8 @@ function PrincipalRegisterPage() {
         errors.nrcNumberRaw = nrcNumberMessage;
       }
       if (!values.residentialAddress.trim()) errors.residentialAddress = addressMessage;
+      if (!values.stateRegionId) errors.stateRegionId = requiredMessage;
+      if (!values.townshipId) errors.townshipId = requiredMessage;
     }
 
     if (step === 1) {
@@ -393,8 +481,10 @@ function PrincipalRegisterPage() {
     }
 
     if (step === 2) {
-      if (!files.nrcFront) errors.nrcFront = nrcFrontMessage;
-      if (!files.nrcBack) errors.nrcBack = nrcBackMessage;
+      if (!hasDocument("nrcFront")) errors.nrcFront = nrcFrontMessage;
+      if (!hasDocument("nrcBack")) errors.nrcBack = nrcBackMessage;
+      if (!hasDocument("degreeCertificate")) errors.degreeCertificate = requiredMessage;
+      if (!hasDocument("teachingLicense")) errors.teachingLicense = requiredMessage;
       if (files.degreeCertificate && !isPdfFile(files.degreeCertificate)) {
         errors.degreeCertificate = pdfFileMessage;
       }
@@ -429,6 +519,8 @@ function PrincipalRegisterPage() {
         "nrcType",
         "nrcNumberRaw",
         "residentialAddress",
+        "stateRegionId",
+        "townshipId",
       ].includes(field)
     ) {
       return 0;
@@ -509,6 +601,71 @@ function PrincipalRegisterPage() {
     return uploadedPaths;
   };
 
+  const mergeSavedDocumentPaths = (uploadedPaths: Partial<Record<FileKey, string>>) => {
+    const nextPaths = {
+      ...savedDocumentPaths,
+      ...uploadedPaths,
+    };
+    setSavedDocumentPaths(nextPaths);
+    return nextPaths;
+  };
+
+  const saveCurrentStepDraft = async (step: number) => {
+    if (invite.status !== "ready") return;
+
+    if (step === 0) {
+      await savePrincipalRegistrationDraft({
+        data: {
+          token,
+          step: 1,
+          fullNameMm: values.fullNameMm.trim(),
+          fullNameEn: values.fullNameEn.trim(),
+          phone: values.phone.trim(),
+          dateOfBirth: values.dateOfBirth,
+          gender: values.gender,
+          nrcNumber: fullNrcNumber,
+          residentialAddress: values.residentialAddress.trim(),
+          stateRegionId: values.stateRegionId ? Number(values.stateRegionId) : null,
+          townshipId: values.townshipId ? Number(values.townshipId) : null,
+        },
+      });
+      return;
+    }
+
+    if (step === 1) {
+      await savePrincipalRegistrationDraft({
+        data: {
+          token,
+          step: 2,
+          highestEducation: values.highestEducation.trim(),
+          yearsOfTeachingExperience: Number(values.yearsOfTeachingExperience || 0),
+          yearsOfManagementExperience: Number(values.yearsOfManagementExperience || 0),
+          previousSchool: values.previousSchool.trim() || null,
+          currentPosition: "",
+        },
+      });
+      return;
+    }
+
+    if (step === 2) {
+      const uploadedPaths = await uploadPrincipalRegistrationFiles();
+      const nextPaths = mergeSavedDocumentPaths(uploadedPaths);
+      await savePrincipalRegistrationDraft({
+        data: {
+          token,
+          step: 3,
+          profilePhotoUrl: nextPaths.profilePhoto || null,
+          nrcFrontUrl: nextPaths.nrcFront || null,
+          nrcBackUrl: nextPaths.nrcBack || null,
+          degreeCertificateUrl: nextPaths.degreeCertificate || null,
+          teachingLicenseUrl: nextPaths.teachingLicense || null,
+          reachedReviewStep: true,
+        },
+      });
+      setFiles({});
+    }
+  };
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (invite.status !== "ready") return;
@@ -520,9 +677,19 @@ function PrincipalRegisterPage() {
     }
 
     if (currentStep < lastRegistrationStepIndex) {
-      setFieldErrors({});
-      setSubmitError("");
-      setCurrentStep((step) => Math.min(step + 1, lastRegistrationStepIndex));
+      setSubmitting(true);
+      try {
+        await saveCurrentStepDraft(currentStep);
+        setFieldErrors({});
+        setSubmitError("");
+        setCurrentStep((step) => Math.min(step + 1, lastRegistrationStepIndex));
+      } catch (error) {
+        setSubmitError(
+          error instanceof Error ? error.message : "Unable to save your draft information.",
+        );
+      } finally {
+        setSubmitting(false);
+      }
       return;
     }
 
@@ -540,13 +707,14 @@ function PrincipalRegisterPage() {
 
     try {
       const uploadedPaths = await uploadPrincipalRegistrationFiles();
-      const profilePhotoUrl = uploadedPaths.profilePhoto || null;
-      const nrcFrontUrl = uploadedPaths.nrcFront || null;
-      const nrcBackUrl = uploadedPaths.nrcBack || null;
-      const degreeCertificateUrl = uploadedPaths.degreeCertificate || null;
-      const teachingLicenseUrl = uploadedPaths.teachingLicense || null;
+      const nextPaths = mergeSavedDocumentPaths(uploadedPaths);
+      const profilePhotoUrl = nextPaths.profilePhoto || null;
+      const nrcFrontUrl = nextPaths.nrcFront || null;
+      const nrcBackUrl = nextPaths.nrcBack || null;
+      const degreeCertificateUrl = nextPaths.degreeCertificate || null;
+      const teachingLicenseUrl = nextPaths.teachingLicense || null;
 
-      if (!nrcFrontUrl || !nrcBackUrl) {
+      if (!nrcFrontUrl || !nrcBackUrl || !degreeCertificateUrl || !teachingLicenseUrl) {
         throw new Error("Required documents are missing.");
       }
 
@@ -645,8 +813,10 @@ function PrincipalRegisterPage() {
     Other: "အခြား",
   };
   const genderDisplay = genderLabels[values.gender] || displayValue(values.gender);
-  const uploadedStatus = (file?: File) => (file ? "တင်ပြီးပါပြီ" : "မတင်ထားပါ");
-  const requiredUploadStatus = (file?: File) => (file ? "တင်ပြီးပါပြီ" : "တင်ရန်လိုအပ်ပါသည်");
+  const hasDocument = (key: FileKey) => Boolean(files[key] || savedDocumentPaths[key]);
+  const uploadedStatus = (key: FileKey) => (hasDocument(key) ? "တင်ပြီးပါပြီ" : "မတင်ထားပါ");
+  const requiredUploadStatus = (key: FileKey) =>
+    hasDocument(key) ? "တင်ပြီးပါပြီ" : "တင်ရန်လိုအပ်ပါသည်";
   const editStep = (step: number) => {
     setFieldErrors({});
     setSubmitError("");
@@ -786,7 +956,7 @@ function PrincipalRegisterPage() {
                 onChange={(value) => updateValue("nrcTownship", value)}
                 disabled={!values.nrcState}
                 options={nrcTownships.map((township) => ({
-                  value: township.name,
+                  value: township.nrc_code || township.name,
                   label: `${township.name}${township.nrc_code ? ` (${township.nrc_code})` : ""}`,
                 }))}
               />
@@ -818,7 +988,9 @@ function PrincipalRegisterPage() {
               </div>
               <SelectInput
                 label="State/Region"
+                fieldName="stateRegionId"
                 value={values.stateRegionId}
+                error={fieldErrors.stateRegionId}
                 onChange={(value) => updateValue("stateRegionId", value)}
                 options={regions.map((region) => ({
                   value: String(region.id),
@@ -827,7 +999,9 @@ function PrincipalRegisterPage() {
               />
               <SelectInput
                 label="Township"
+                fieldName="townshipId"
                 value={values.townshipId}
+                error={fieldErrors.townshipId}
                 onChange={(value) => updateValue("townshipId", value)}
                 options={townships.map((township) => ({
                   value: String(township.id),
@@ -921,6 +1095,7 @@ function PrincipalRegisterPage() {
                   fieldName={key}
                   label={fileLabels[key]}
                   file={files[key]}
+                  existingPath={savedDocumentPaths[key]}
                   error={fieldErrors[key]}
                   accept={isPdfOnlyFileKey(key) ? "application/pdf,.pdf" : undefined}
                   onChange={(file) => updateFile(key, file)}
@@ -978,26 +1153,30 @@ function PrincipalRegisterPage() {
                   </ReviewCard>
 
                   <ReviewCard title="စာရွက်စာတမ်းများ" onEdit={() => editStep(2)}>
-                    <DocumentStatusRow label="Profile ဓာတ်ပုံ" status={uploadedStatus(files.profilePhoto)} />
+                    <DocumentStatusRow label="Profile ဓာတ်ပုံ" status={uploadedStatus("profilePhoto")} />
                     <DocumentStatusRow
                       label="NRC ရှေ့ဘက်"
-                      status={requiredUploadStatus(files.nrcFront)}
+                      status={requiredUploadStatus("nrcFront")}
                       required
-                      uploaded={Boolean(files.nrcFront)}
+                      uploaded={hasDocument("nrcFront")}
                     />
                     <DocumentStatusRow
                       label="NRC နောက်ဘက်"
-                      status={requiredUploadStatus(files.nrcBack)}
+                      status={requiredUploadStatus("nrcBack")}
                       required
-                      uploaded={Boolean(files.nrcBack)}
+                      uploaded={hasDocument("nrcBack")}
                     />
                     <DocumentStatusRow
                       label="ပညာအရည်အချင်းလက်မှတ်"
-                      status={uploadedStatus(files.degreeCertificate)}
+                      status={requiredUploadStatus("degreeCertificate")}
+                      required
+                      uploaded={hasDocument("degreeCertificate")}
                     />
                     <DocumentStatusRow
                       label="သင်ကြားခွင့် / လုပ်ငန်းလိုင်စင်လက်မှတ်"
-                      status={uploadedStatus(files.teachingLicense)}
+                      status={requiredUploadStatus("teachingLicense")}
+                      required
+                      uploaded={hasDocument("teachingLicense")}
                     />
                   </ReviewCard>
                 </div>
@@ -1320,6 +1499,7 @@ function FileInput({
   label,
   fieldName,
   file,
+  existingPath,
   onChange,
   error,
   accept,
@@ -1327,6 +1507,7 @@ function FileInput({
   label: string;
   fieldName: FileKey;
   file?: File;
+  existingPath?: string;
   onChange: (file: File | undefined) => void;
   error?: string;
   accept?: string;
@@ -1348,7 +1529,7 @@ function FileInput({
           <div className="min-w-0">
             <p className="text-sm font-bold">{label}</p>
             <p className="mt-1 truncate text-xs text-muted-foreground">
-              {file?.name || "No file selected"}
+              {file?.name || (existingPath ? "Saved file is already uploaded" : "No file selected")}
             </p>
             {accept && (
               <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
@@ -1359,7 +1540,7 @@ function FileInput({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {file && (
+          {(file || existingPath) && (
             <button
               type="button"
               className="glass-panel inline-flex h-10 w-10 items-center justify-center rounded-2xl text-muted-foreground transition hover:text-destructive"
@@ -1371,7 +1552,7 @@ function FileInput({
           )}
           <label className="aqua-button inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-xs font-bold text-primary-foreground transition hover:brightness-105">
             <Upload className="h-4 w-4" />
-            {file ? "Replace" : "Upload"}
+            {file || existingPath ? "Replace" : "Upload"}
             <input
               type="file"
               accept={accept}

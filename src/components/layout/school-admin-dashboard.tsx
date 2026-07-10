@@ -57,9 +57,11 @@ import { EmptyState } from "@/components/ui-kit/EmptyState";
 import { GlassCard } from "@/components/ui-kit/GlassCard";
 import {
   createPrincipalDocumentSignedUrl,
+  cancelPrincipalInvitation,
   getPrincipalManagementData,
   invitePrincipal,
   registerSelfPrincipal,
+  resendPrincipalInvite,
   reviewPrincipalRegistration,
 } from "@/lib/api/principal-account.functions";
 import { useTheme } from "@/lib/theme";
@@ -1751,7 +1753,13 @@ export function SchoolProfilePage() {
   );
 }
 
-type PrincipalRequestStatus = "invited" | "pending" | "approved" | "rejected";
+type PrincipalRequestStatus =
+  | "invited"
+  | "draft"
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "cancelled";
 
 type PrincipalRegistrationRequest = {
   id: string;
@@ -1787,6 +1795,15 @@ type PrincipalRegistrationRequest = {
   emergency_contact_phone: string | null;
   rejection_reason: string | null;
   reviewed_at: string | null;
+  current_step: number | null;
+  draft_saved_at: string | null;
+  submitted_at: string | null;
+  final_confirmed_at: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancellation_reason: string | null;
+  invite_resent_at: string | null;
+  invite_resent_count: number | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -1813,7 +1830,7 @@ type ActivePrincipalProfile = {
   status: string | null;
 };
 
-type PrincipalTab = "invited" | "pending" | "setup" | "active" | "rejected";
+type PrincipalTab = "invited" | "pending" | "setup" | "active" | "history";
 type PrincipalMode = "self" | "invite";
 
 const principalRegistrationRequestSelect = [
@@ -1850,6 +1867,15 @@ const principalRegistrationRequestSelect = [
   "emergency_contact_phone",
   "rejection_reason",
   "reviewed_at",
+  "current_step",
+  "draft_saved_at",
+  "submitted_at",
+  "final_confirmed_at",
+  "cancelled_at",
+  "cancelled_by",
+  "cancellation_reason",
+  "invite_resent_at",
+  "invite_resent_count",
   "created_at",
   "updated_at",
 ].join(", ");
@@ -1944,6 +1970,7 @@ export function PrincipalManagementPage() {
   const [reviewingId, setReviewingId] = useState("");
   const [rejectingId, setRejectingId] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
+  const [principalActionId, setPrincipalActionId] = useState("");
   const [selfForm, setSelfForm] = useState<PrincipalSelfFormValues>({
     fullNameMm: access.profile.full_name || "",
     fullNameEn: "",
@@ -1971,10 +1998,20 @@ export function PrincipalManagementPage() {
   const [allTownships, setAllTownships] = useState<TownshipOption[]>([]);
   const [selfSubmitting, setSelfSubmitting] = useState(false);
 
-  const invitedRequests = requests.filter((request) => request.status === "invited");
-  const pendingRequests = requests.filter((request) => request.status === "pending");
-  const rejectedRequests = requests.filter((request) => request.status === "rejected");
+  const invitedRequests = requests.filter(
+    (request) => request.status === "invited" || request.status === "draft",
+  );
+  const pendingRequests = requests.filter(
+    (request) => request.status === "pending" && Boolean(request.final_confirmed_at),
+  );
+  const historyRequests = requests.filter(
+    (request) => request.status === "rejected" || request.status === "cancelled",
+  );
+  const hasActivePrincipalRequest = requests.some((request) =>
+    ["invited", "draft", "pending", "approved"].includes(request.status),
+  );
   const hasPrincipalAssignment = Boolean(activePrincipal || pendingSetupPrincipal);
+  const hasPrincipalFlow = hasPrincipalAssignment || hasActivePrincipalRequest;
   const regionNameById = useMemo(
     () => new Map(regions.map((region) => [region.id, region.name])),
     [regions],
@@ -2090,6 +2127,64 @@ export function PrincipalManagementPage() {
     } catch (error) {
       console.error("[Principal invite UI] Unable to copy manual invite link", error);
       setErrorMessage("Unable to copy the Principal invite link.");
+    }
+  };
+
+  const resendInviteRequest = async (requestId: string) => {
+    setPrincipalActionId(requestId);
+    setMessage("");
+    setErrorMessage("");
+    setManualInviteLink("");
+    setManualInviteCopied(false);
+
+    try {
+      const accessToken = await getAccessToken();
+      const result = await resendPrincipalInvite({
+        data: {
+          accessToken,
+          requestId,
+        },
+      });
+
+      setMessage(
+        result.emailSent ? `Principal invite email sent to ${result.email}.` : result.message,
+      );
+      setManualInviteLink(result.manualMode ? result.inviteUrl : "");
+      await loadPrincipalData(false);
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to resend Principal invite.",
+      );
+    } finally {
+      setPrincipalActionId("");
+    }
+  };
+
+  const cancelInviteRequest = async (requestId: string) => {
+    setPrincipalActionId(requestId);
+    setMessage("");
+    setErrorMessage("");
+    setManualInviteLink("");
+    setManualInviteCopied(false);
+
+    try {
+      const accessToken = await getAccessToken();
+      const result = await cancelPrincipalInvitation({
+        data: {
+          accessToken,
+          requestId,
+        },
+      });
+
+      setMessage(result.message || "Principal invitation has been cancelled.");
+      await loadPrincipalData(false);
+      setTab("history");
+    } catch (error) {
+      setErrorMessage(
+        error instanceof Error ? error.message : "Unable to cancel Principal invitation.",
+      );
+    } finally {
+      setPrincipalActionId("");
     }
   };
 
@@ -2225,7 +2320,7 @@ export function PrincipalManagementPage() {
       setRejectionReason("");
       await loadPrincipalData(false);
       if (status === "approved") setTab("setup");
-      if (status === "rejected") setTab("rejected");
+      if (status === "rejected") setTab("history");
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : "Unable to review Principal request.",
@@ -2236,7 +2331,7 @@ export function PrincipalManagementPage() {
   };
 
   const tabs: Array<{ key: PrincipalTab; label: string; count: number; icon: LucideIcon }> = [
-    { key: "invited", label: "Pending Invitations", count: invitedRequests.length, icon: MailPlus },
+    { key: "invited", label: "Invited / Draft", count: invitedRequests.length, icon: MailPlus },
     { key: "pending", label: "Pending Reviews", count: pendingRequests.length, icon: Clock3 },
     {
       key: "setup",
@@ -2245,7 +2340,7 @@ export function PrincipalManagementPage() {
       icon: Lock,
     },
     { key: "active", label: "Active Principal", count: activePrincipal ? 1 : 0, icon: ShieldCheck },
-    { key: "rejected", label: "Rejected", count: rejectedRequests.length, icon: XCircle },
+    { key: "history", label: "Rejected / Cancelled", count: historyRequests.length, icon: XCircle },
   ];
 
   return (
@@ -2326,7 +2421,7 @@ export function PrincipalManagementPage() {
               type="button"
               className="aqua-button mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
               onClick={handleSelfPrincipalConfirm}
-              disabled={selfSubmitting || hasPrincipalAssignment}
+              disabled={selfSubmitting || hasPrincipalFlow}
             >
               {selfSubmitting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -2343,17 +2438,17 @@ export function PrincipalManagementPage() {
             email={inviteEmail}
             note={inviteNote}
             inviting={inviting}
-            activePrincipal={hasPrincipalAssignment}
+            activePrincipal={hasPrincipalFlow}
             onEmailChange={setInviteEmail}
             onNoteChange={setInviteNote}
             onSubmit={handleInvite}
           />
         )}
 
-        {principalMode && hasPrincipalAssignment && (
+        {principalMode && hasPrincipalFlow && (
           <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-semibold text-amber-700 dark:text-amber-200">
-            This school already has a Principal assignment. New setup actions are disabled while
-            the Principal is active or waiting for password setup.
+            This school already has a Principal invitation or assignment. Cancel the current
+            invitation first if you need to invite another email.
           </div>
         )}
 
@@ -2438,13 +2533,19 @@ export function PrincipalManagementPage() {
               <div className="grid gap-4 xl:grid-cols-2">
                 {invitedRequests.length > 0 ? (
                   invitedRequests.map((request) => (
-                    <PrincipalInviteCard key={request.id} request={request} />
+                    <PrincipalInviteCard
+                      key={request.id}
+                      request={request}
+                      busy={principalActionId === request.id}
+                      onResend={() => resendInviteRequest(request.id)}
+                      onCancel={() => cancelInviteRequest(request.id)}
+                    />
                   ))
                 ) : (
                   <EmptyState
                     icon={MailPlus}
-                    title="No pending invitations"
-                    description="Invited Principal links that are not submitted yet will appear here."
+                    title="No invited or draft request"
+                    description="Principal invitations and saved drafts will appear here."
                   />
                 )}
               </div>
@@ -2480,7 +2581,9 @@ export function PrincipalManagementPage() {
                       onRejectionReasonChange={setRejectionReason}
                       onApprove={() => reviewRequest(request.id, "approved")}
                       onReject={() => reviewRequest(request.id, "rejected")}
+                      onCancel={() => cancelInviteRequest(request.id)}
                       onOpenDocument={openPrincipalDocument}
+                      actionBusy={principalActionId === request.id}
                     />
                   ))
                 ) : (
@@ -2503,15 +2606,15 @@ export function PrincipalManagementPage() {
               />
             ) : (
               <div className="grid gap-4 xl:grid-cols-2">
-                {rejectedRequests.length > 0 ? (
-                  rejectedRequests.map((request) => (
+                {historyRequests.length > 0 ? (
+                  historyRequests.map((request) => (
                     <PrincipalRejectedCard key={request.id} request={request} />
                   ))
                 ) : (
                   <EmptyState
                     icon={XCircle}
-                    title="No rejected requests"
-                    description="Rejected Principal registrations will appear here."
+                    title="No rejected or cancelled requests"
+                    description="Principal registration history will appear here."
                   />
                 )}
               </div>
@@ -2868,21 +2971,42 @@ function PrincipalFileInput({
   );
 }
 
-function PrincipalInviteCard({ request }: { request: PrincipalRegistrationRequest }) {
+const getPrincipalDraftStatusLabel = (request: PrincipalRegistrationRequest) => {
+  if (request.status === "invited") return "Invited";
+  const step = request.current_step || 0;
+  if (step >= 4) return "Draft - Waiting final confirmation";
+  if (step >= 3) return "Draft - Step 3 completed";
+  if (step >= 2) return "Draft - Step 2 completed";
+  if (step >= 1) return "Draft - Step 1 completed";
+  return "Draft";
+};
+
+function PrincipalInviteCard({
+  request,
+  busy,
+  onResend,
+  onCancel,
+}: {
+  request: PrincipalRegistrationRequest;
+  busy: boolean;
+  onResend: () => void;
+  onCancel: () => void;
+}) {
   const expiresAt = request.invite_token_expires_at
     ? formatDashboardDate(request.invite_token_expires_at)
     : "No expiry date";
+  const statusLabel = getPrincipalDraftStatusLabel(request);
 
   return (
     <GlassCard className="rounded-[2rem] p-5">
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <SectionTitle icon={MailPlus} title={request.email} />
           <p className="mt-2 text-sm text-muted-foreground">
             Created {formatDashboardDate(request.created_at)}
           </p>
         </div>
-        <StatusPill icon={Clock3} label="Invited" tone="amber" />
+        <StatusPill icon={Clock3} label={statusLabel} tone="amber" />
       </div>
       {request.invite_note && (
         <p className="mt-4 rounded-2xl border border-border/60 bg-muted/20 p-3 text-sm text-muted-foreground">
@@ -2891,7 +3015,29 @@ function PrincipalInviteCard({ request }: { request: PrincipalRegistrationReques
       )}
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <DetailItem label="Expires" value={expiresAt} />
-        <DetailItem label="Status" value="Waiting for registration form" />
+        <DetailItem label="Current step" value={`Step ${request.current_step || 0} of 4`} />
+        <DetailItem label="Draft saved" value={formatDashboardDate(request.draft_saved_at)} />
+        <DetailItem label="Invite resent" value={String(request.invite_resent_count || 0)} />
+      </div>
+      <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          className="aqua-button inline-flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={onResend}
+          disabled={busy}
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <MailPlus className="h-4 w-4" />}
+          Resend Invite Link
+        </button>
+        <button
+          type="button"
+          className="glass-panel inline-flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold text-destructive disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={onCancel}
+          disabled={busy}
+        >
+          <XCircle className="h-4 w-4" />
+          Cancel Invitation
+        </button>
       </div>
     </GlassCard>
   );
@@ -2979,7 +3125,9 @@ function PrincipalReviewCard({
   onRejectionReasonChange,
   onApprove,
   onReject,
+  onCancel,
   onOpenDocument,
+  actionBusy,
 }: {
   request: PrincipalRegistrationRequest;
   schoolName: string;
@@ -2994,7 +3142,9 @@ function PrincipalReviewCard({
   onRejectionReasonChange: (value: string) => void;
   onApprove: () => void;
   onReject: () => void;
+  onCancel: () => void;
   onOpenDocument: (document: PrincipalUploadedDocument) => void;
+  actionBusy: boolean;
 }) {
   const documents = getPrincipalUploadedDocuments(request);
   const hasEmergencyContact = Boolean(
@@ -3028,7 +3178,7 @@ function PrincipalReviewCard({
             type="button"
             className="aqua-button inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60"
             onClick={onApprove}
-            disabled={reviewing}
+            disabled={reviewing || actionBusy}
           >
             {reviewing ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -3041,10 +3191,23 @@ function PrincipalReviewCard({
             type="button"
             className="glass-panel inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-bold text-destructive disabled:cursor-not-allowed disabled:opacity-60"
             onClick={() => onRejectingChange(!rejecting)}
-            disabled={reviewing}
+            disabled={reviewing || actionBusy}
           >
             <XCircle className="h-4 w-4" />
             Reject
+          </button>
+          <button
+            type="button"
+            className="glass-panel inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-bold text-destructive disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={onCancel}
+            disabled={reviewing || actionBusy}
+          >
+            {actionBusy ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <XCircle className="h-4 w-4" />
+            )}
+            Cancel
           </button>
         </div>
       </div>
@@ -3253,6 +3416,7 @@ function PrincipalSetupPendingCard({
 }
 
 function PrincipalRejectedCard({ request }: { request: PrincipalRegistrationRequest }) {
+  const isCancelled = request.status === "cancelled";
   return (
     <GlassCard className="rounded-[2rem] p-5">
       <div className="flex items-start justify-between gap-3">
@@ -3262,17 +3426,22 @@ function PrincipalRejectedCard({ request }: { request: PrincipalRegistrationRequ
             title={request.full_name_mm || request.full_name_en || request.email}
           />
           <p className="mt-2 text-sm text-muted-foreground">
-            Reviewed {formatDashboardDate(request.reviewed_at || request.updated_at)}
+            {isCancelled ? "Cancelled" : "Reviewed"}{" "}
+            {formatDashboardDate(
+              isCancelled ? request.cancelled_at || request.updated_at : request.reviewed_at || request.updated_at,
+            )}
           </p>
         </div>
-        <StatusPill icon={XCircle} label="Rejected" tone="destructive" />
+        <StatusPill icon={XCircle} label={isCancelled ? "Cancelled" : "Rejected"} tone="destructive" />
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <DetailItem label="Email" value={request.email} />
         <DetailItem label="Phone" value={request.phone} />
       </div>
       <p className="mt-4 rounded-2xl border border-destructive/20 bg-destructive/10 p-3 text-sm leading-6 text-destructive">
-        {request.rejection_reason || "No rejection reason provided."}
+        {isCancelled
+          ? request.cancellation_reason || "Invitation was cancelled before approval."
+          : request.rejection_reason || "No rejection reason provided."}
       </p>
     </GlassCard>
   );
