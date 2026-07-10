@@ -937,7 +937,7 @@ export function SchoolAdminDashboardOverview() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {metricCards.map((metric) => (
           <MetricCard
-            key={metric.label}
+            key={metric.key}
             icon={metric.icon}
             label={metric.label}
             loading={metrics[metric.key].loading}
@@ -1890,6 +1890,7 @@ type TownshipOption = { id: number; region_id: number; name: string };
 type PrincipalDocumentBucket = "application-nrc-docs" | "application-school-docs";
 
 type PrincipalUploadedDocument = {
+  documentType: PrincipalSelfFileKey;
   label: string;
   bucket: PrincipalDocumentBucket;
   path: string | null;
@@ -2417,75 +2418,71 @@ export function PrincipalManagementPage() {
             Loading Principal data...
           </GlassCard>
         ) : (
-          <>
-          {tab === "invited" && (
-            <div className="grid gap-4 xl:grid-cols-2">
-              {invitedRequests.length > 0 ? (
-                invitedRequests.map((request) => (
-                  <PrincipalInviteCard key={request.id} request={request} />
-                ))
-              ) : (
-                <EmptyState
-                  icon={MailPlus}
-                  title="No pending invitations"
-                  description="Invited Principal links that are not submitted yet will appear here."
-                />
-              )}
-            </div>
-          )}
-
-          {tab === "pending" && (
-            <div className="space-y-4">
-              {pendingRequests.length > 0 ? (
-                pendingRequests.map((request) => (
-                  <PrincipalReviewCard
-                    key={request.id}
-                    request={request}
-                    schoolName={access.school.school_name}
-                    schoolType={access.school.school_type}
-                    schoolAddress={access.school.address}
-                    regionName={
-                      request.state_region_id
-                        ? regionNameById.get(request.state_region_id) ||
-                          String(request.state_region_id)
-                        : null
-                    }
-                    townshipName={
-                      request.township_id
-                        ? townshipNameById.get(request.township_id) ||
-                          String(request.township_id)
-                        : null
-                    }
-                    reviewing={reviewingId === request.id}
-                    rejecting={rejectingId === request.id}
-                    rejectionReason={rejectionReason}
-                    onRejectingChange={(active) => {
-                      setRejectingId(active ? request.id : "");
-                      setRejectionReason("");
-                    }}
-                    onRejectionReasonChange={setRejectionReason}
-                    onApprove={() => reviewRequest(request.id, "approved")}
-                    onReject={() => reviewRequest(request.id, "rejected")}
-                    onOpenDocument={openPrincipalDocument}
+          <div key={tab} className="min-w-0" data-principal-tab={tab}>
+            {tab === "invited" ? (
+              <div className="grid gap-4 xl:grid-cols-2">
+                {invitedRequests.length > 0 ? (
+                  invitedRequests.map((request) => (
+                    <PrincipalInviteCard key={request.id} request={request} />
+                  ))
+                ) : (
+                  <EmptyState
+                    icon={MailPlus}
+                    title="No pending invitations"
+                    description="Invited Principal links that are not submitted yet will appear here."
                   />
-                ))
-              ) : (
-                <EmptyState
-                  icon={Clock3}
-                  title="No pending reviews"
-                  description="Submitted Principal registration forms waiting for School Admin review will appear here."
-                />
-              )}
-            </div>
-          )}
-
-          {tab === "active" && (
-            <PrincipalActiveCard
-              principal={activePrincipal}
-              schoolName={access.school.school_name}
-            />
-          )}
-          </>
+                )}
+              </div>
+            ) : tab === "pending" ? (
+              <div className="space-y-4">
+                {pendingRequests.length > 0 ? (
+                  pendingRequests.map((request) => (
+                    <PrincipalReviewCard
+                      key={request.id}
+                      request={request}
+                      schoolName={access.school.school_name}
+                      schoolType={access.school.school_type}
+                      schoolAddress={access.school.address}
+                      regionName={
+                        request.state_region_id
+                          ? regionNameById.get(request.state_region_id) ||
+                            String(request.state_region_id)
+                          : null
+                      }
+                      townshipName={
+                        request.township_id
+                          ? townshipNameById.get(request.township_id) ||
+                            String(request.township_id)
+                          : null
+                      }
+                      reviewing={reviewingId === request.id}
+                      rejecting={rejectingId === request.id}
+                      rejectionReason={rejectionReason}
+                      onRejectingChange={(active) => {
+                        setRejectingId(active ? request.id : "");
+                        setRejectionReason("");
+                      }}
+                      onRejectionReasonChange={setRejectionReason}
+                      onApprove={() => reviewRequest(request.id, "approved")}
+                      onReject={() => reviewRequest(request.id, "rejected")}
+                      onOpenDocument={openPrincipalDocument}
+                    />
+                  ))
+                ) : (
+                  <EmptyState
+                    icon={Clock3}
+                    title="No pending reviews"
+                    description="Submitted Principal registration forms waiting for School Admin review will appear here."
+                  />
+                )}
+              </div>
+            ) : (
+              <PrincipalActiveCard
+                principal={activePrincipal}
+                schoolName={access.school.school_name}
+              />
+            )}
+          </div>
         )}
       </>
     </div>
@@ -2873,12 +2870,14 @@ const getPrincipalUploadedDocuments = (
     label: "Profile ဓာတ်ပုံ",
     bucket: "application-nrc-docs",
     path: request.profile_photo_url,
+    documentType: "profilePhoto",
     buttonLabel: "View",
   },
   {
     label: "NRC ရှေ့ဘက်",
     bucket: "application-nrc-docs",
     path: request.nrc_front_url,
+    documentType: "nrcFront",
     buttonLabel: "View",
     required: true,
   },
@@ -2886,6 +2885,7 @@ const getPrincipalUploadedDocuments = (
     label: "NRC နောက်ဘက်",
     bucket: "application-nrc-docs",
     path: request.nrc_back_url,
+    documentType: "nrcBack",
     buttonLabel: "View",
     required: true,
   },
@@ -2893,6 +2893,7 @@ const getPrincipalUploadedDocuments = (
     label: "ပညာအရည်အချင်းလက်မှတ်",
     bucket: "application-school-docs",
     path: request.degree_certificate_url,
+    documentType: "degreeCertificate",
     buttonLabel: "Open PDF",
     required: true,
   },
@@ -2900,6 +2901,7 @@ const getPrincipalUploadedDocuments = (
     label: "သင်ကြားခွင့် / လုပ်ငန်းလိုင်စင်လက်မှတ်",
     bucket: "application-school-docs",
     path: request.teaching_license_url,
+    documentType: "teachingLicense",
     buttonLabel: "Open PDF",
     required: true,
   },
@@ -2907,6 +2909,7 @@ const getPrincipalUploadedDocuments = (
     label: "Appointment Letter",
     bucket: "application-school-docs",
     path: request.appointment_letter_url,
+    documentType: "appointmentLetter",
     buttonLabel: "Open PDF",
     optional: true,
   },
@@ -2914,6 +2917,7 @@ const getPrincipalUploadedDocuments = (
     label: "Resume",
     bucket: "application-school-docs",
     path: request.resume_url,
+    documentType: "resume",
     buttonLabel: "Open PDF",
     optional: true,
   },
@@ -2921,6 +2925,7 @@ const getPrincipalUploadedDocuments = (
     label: "Recommendation Letter",
     bucket: "application-school-docs",
     path: request.recommendation_letter_url,
+    documentType: "recommendationLetter",
     buttonLabel: "Open PDF",
     optional: true,
   },
@@ -3076,7 +3081,7 @@ function PrincipalReviewCard({
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {documents.map((document) => (
             <div
-              key={document.label}
+              key={`${request.id}-${document.documentType}`}
               className="rounded-2xl border border-border/50 bg-background/25 p-3"
             >
               <div className="flex items-start justify-between gap-3">

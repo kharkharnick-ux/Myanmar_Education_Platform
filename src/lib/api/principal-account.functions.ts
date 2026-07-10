@@ -213,6 +213,7 @@ const logPrincipalServerError = (label: string, error: unknown, context: Princip
 
 const principalManagementRequestSelect = [
   "id",
+  "request_type",
   "email",
   "phone",
   "full_name_mm",
@@ -244,10 +245,92 @@ const principalManagementRequestSelect = [
   "emergency_contact_relationship",
   "emergency_contact_phone",
   "rejection_reason",
+  "approved_school_id",
   "reviewed_at",
   "created_at",
   "updated_at",
 ].join(", ");
+
+type PrincipalManagementRequestForFiltering = {
+  id: string;
+  email: string;
+  status: PrincipalRequestRow["status"];
+  approved_school_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+const actionablePrincipalRequestStatuses = new Set<PrincipalRequestRow["status"]>([
+  "invited",
+  "pending",
+]);
+
+const getPrincipalRequestTimestamp = (request: PrincipalManagementRequestForFiltering) => {
+  const timestamp = Date.parse(request.updated_at || request.created_at || "");
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const sortPrincipalRequestsNewestFirst = <T extends PrincipalManagementRequestForFiltering>(
+  left: T,
+  right: T,
+) => getPrincipalRequestTimestamp(right) - getPrincipalRequestTimestamp(left);
+
+const getPrincipalDuplicateRequestKey = (
+  request: PrincipalManagementRequestForFiltering,
+  schoolId: string,
+) => `${normalizeEmail(request.email)}::${request.approved_school_id || schoolId}`;
+
+const filterCurrentActionablePrincipalRequests = <T extends PrincipalManagementRequestForFiltering>(
+  requests: T[],
+  schoolId: string,
+) => {
+  const requestsByEmailAndSchool = new Map<string, T[]>();
+
+  for (const request of requests) {
+    const key = getPrincipalDuplicateRequestKey(request, schoolId);
+    requestsByEmailAndSchool.set(key, [...(requestsByEmailAndSchool.get(key) || []), request]);
+  }
+
+  const filteredRequests: T[] = [];
+
+  for (const [key, duplicateRequests] of requestsByEmailAndSchool.entries()) {
+    if (duplicateRequests.length > 1) {
+      const [email] = key.split("::");
+      console.info("[Principal approval] duplicate requests found", {
+        context: "principal-management-load",
+        schoolId,
+        requestEmail: email,
+        duplicateRequestCount: duplicateRequests.length - 1,
+        actionableDuplicateRequestCount: duplicateRequests.filter((request) =>
+          actionablePrincipalRequestStatuses.has(request.status),
+        ).length,
+      });
+    }
+
+    const finalRequests = duplicateRequests.filter((request) =>
+      !actionablePrincipalRequestStatuses.has(request.status),
+    );
+    const hasApprovedRequest = finalRequests.some((request) => request.status === "approved");
+
+    if (hasApprovedRequest) {
+      filteredRequests.push(...finalRequests);
+      continue;
+    }
+
+    const latestPendingRequest = duplicateRequests
+      .filter((request) => request.status === "pending")
+      .sort(sortPrincipalRequestsNewestFirst)[0];
+    const latestInvitedRequest = duplicateRequests
+      .filter((request) => request.status === "invited")
+      .sort(sortPrincipalRequestsNewestFirst)[0];
+    const currentActionableRequest = latestPendingRequest || latestInvitedRequest;
+
+    filteredRequests.push(...finalRequests);
+    if (currentActionableRequest) filteredRequests.push(currentActionableRequest);
+  }
+
+  return filteredRequests.sort(sortPrincipalRequestsNewestFirst);
+};
 
 const principalDocumentUrlColumns = [
   "profile_photo_url",
@@ -759,6 +842,8 @@ const findAuthUserByEmail = async (supabaseAdmin: SupabaseAdmin, email: string) 
   return null;
 };
 
+type PrincipalAuthUser = NonNullable<Awaited<ReturnType<typeof findAuthUserByEmail>>>;
+
 const formatExistingAccountRole = (role?: string | null) => {
   if (!role) return "ရှိပြီးသားတာဝန်";
 
@@ -847,6 +932,7 @@ const inviteOrResetPrincipalUser = async (
   supabaseAdmin: SupabaseAdmin,
   request: PrincipalRequestRow,
   reviewerId: string,
+  existingAuthUser?: PrincipalAuthUser | null,
 ) => {
   const redirectTo = await getPasswordSetupRedirectUrl();
   const normalizedEmail = normalizeEmail(request.email);
@@ -859,10 +945,31 @@ const inviteOrResetPrincipalUser = async (
     approved_by_school_admin_id: reviewerId,
     approved_school_id: request.approved_school_id,
   };
-  const existingUserWarning = await getExistingPrincipalInviteWarning(supabaseAdmin, normalizedEmail);
 
-  if (existingUserWarning) {
-    throw new Error(existingUserWarning);
+  const authUser = existingAuthUser ?? (await findAuthUserByEmail(supabaseAdmin, normalizedEmail));
+
+  if (authUser) {
+    const currentMetadata = (authUser.user_metadata || {}) as Record<string, unknown>;
+    const { data: updatedUserData, error: updateUserError } =
+      await supabaseAdmin.auth.admin.updateUserById(authUser.id, {
+        user_metadata: {
+          ...currentMetadata,
+          ...userMetadata,
+        },
+      });
+
+    if (updateUserError) throw updateUserError;
+
+    const { error: resetError } = await supabaseAdmin.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo,
+    });
+
+    if (resetError) throw resetError;
+
+    return {
+      user: updatedUserData.user || authUser,
+      emailAction: "password_reset" as const,
+    };
   }
 
   const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(normalizedEmail, {
@@ -870,9 +977,21 @@ const inviteOrResetPrincipalUser = async (
     data: userMetadata,
   });
 
-  if (error) throw error;
+  if (error) {
+    const racedAuthUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail);
+
+    if (racedAuthUser) {
+      return inviteOrResetPrincipalUser(supabaseAdmin, request, reviewerId, racedAuthUser);
+    }
+
+    throw error;
+  }
   if (!data.user) throw new Error("Unable to create Principal auth invite.");
-  return data.user;
+
+  return {
+    user: data.user,
+    emailAction: "invite" as const,
+  };
 };
 
 export const invitePrincipal = createServerFn({ method: "POST" })
@@ -1156,16 +1275,22 @@ export const getPrincipalManagementData = createServerFn({ method: "POST" })
         }
       : null;
 
+    const currentRequests = filterCurrentActionablePrincipalRequests(
+      ((requests || []) as PrincipalManagementRequestForFiltering[]),
+      school.id,
+    );
+
     console.info("[Principal management] Loaded dashboard data", {
       schoolId: school.id,
       requestCount: requests?.length || 0,
-      pendingCount: (requests || []).filter((request) => request.status === "pending").length,
+      currentRequestCount: currentRequests.length,
+      pendingCount: currentRequests.filter((request) => request.status === "pending").length,
       activePrincipalExists: Boolean(activePrincipal),
     });
 
     return {
       ok: true,
-      requests: requests || [],
+      requests: currentRequests,
       activePrincipal,
       regions: regions || [],
       townships: townships || [],
@@ -1558,6 +1683,12 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
     const { user, school } = await getSchoolAdminContext(supabaseAdmin, data.accessToken);
     const request = await fetchPrincipalRequestForSchool(supabaseAdmin, data.requestId, school.id);
     const now = new Date().toISOString();
+    const requestSchoolId = request.approved_school_id;
+    const normalizedEmail = normalizeEmail(request.email);
+
+    if (!requestSchoolId) {
+      throw new Error("Principal request is missing a school assignment.");
+    }
 
     if (request.status !== "pending") {
       throw new Error("Only pending principal requests can be reviewed.");
@@ -1576,18 +1707,79 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
         })
         .eq("id", request.id)
         .eq("request_type", "principal")
-        .eq("approved_school_id", school.id);
+        .eq("approved_school_id", requestSchoolId);
 
       if (error) throw error;
       return { ok: true };
     }
 
+    type PrincipalDuplicateRequestRow = {
+      id: string;
+      status: PrincipalRequestRow["status"];
+      approved_profile_id: string | null;
+      created_at: string | null;
+      updated_at: string | null;
+    };
+
+    const duplicateEmailMatches = Array.from(
+      new Set([request.email, normalizedEmail].map((email) => email.trim()).filter(Boolean)),
+    );
+
+    const { data: duplicateRequests, error: duplicateRequestsError } = await supabaseAdmin
+      .from("registration_requests")
+      .select("id, status, approved_profile_id, created_at, updated_at")
+      .eq("request_type", "principal")
+      .eq("approved_school_id", requestSchoolId)
+      .in("email", duplicateEmailMatches)
+      .order("created_at", { ascending: false });
+
+    if (duplicateRequestsError) {
+      logPrincipalServerError(
+        "[Principal approval] Duplicate principal request query failed",
+        duplicateRequestsError,
+        {
+          queryName: "principal-duplicate-requests",
+          table: "registration_requests",
+          userId: user.id,
+          schoolId: requestSchoolId,
+          expectedColumns: ["id", "status", "approved_profile_id", "created_at", "updated_at"],
+        },
+      );
+      throw duplicateRequestsError;
+    }
+
+    const duplicateRequestRows = (duplicateRequests || []) as PrincipalDuplicateRequestRow[];
+    const duplicateRequestCount = duplicateRequestRows.filter(
+      (duplicateRequest) => duplicateRequest.id !== request.id,
+    ).length;
+    const actionableDuplicateRequestIds = duplicateRequestRows
+      .filter(
+        (duplicateRequest) =>
+          duplicateRequest.id !== request.id &&
+          actionablePrincipalRequestStatuses.has(duplicateRequest.status),
+      )
+      .map((duplicateRequest) => duplicateRequest.id);
+
+    if (duplicateRequestCount > 0) {
+      console.info("[Principal approval] duplicate requests found", {
+        selectedRequestId: request.id,
+        requestEmail: normalizedEmail,
+        schoolId: requestSchoolId,
+        duplicateRequestCount,
+        actionableDuplicateRequestCount: actionableDuplicateRequestIds.length,
+      });
+    }
+
+    const existingAuthUser = await findAuthUserByEmail(supabaseAdmin, normalizedEmail);
+    const initialTargetPrincipalProfileId = existingAuthUser?.id || null;
+
     const { data: activePrincipal, error: activePrincipalError } = await supabaseAdmin
       .from("teachers")
-      .select("id")
-      .eq("school_id", school.id)
+      .select("id, profile_id")
+      .eq("school_id", requestSchoolId)
       .eq("level", "principal")
       .eq("status", "active")
+      .limit(1)
       .maybeSingle();
 
     if (activePrincipalError) {
@@ -1595,15 +1787,41 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
         queryName: "review-active-principal-check",
         table: "teachers",
         userId: user.id,
-        schoolId: school.id,
-        expectedColumns: ["id", "school_id", "level", "status"],
+        schoolId: requestSchoolId,
+        expectedColumns: ["id", "school_id", "profile_id", "level", "status"],
       });
       throw activePrincipalError;
     }
-    if (activePrincipal) throw new Error(ACTIVE_PRINCIPAL_EXISTS_MESSAGE);
 
-    const authUser = await inviteOrResetPrincipalUser(supabaseAdmin, request, user.id);
-    const normalizedEmail = normalizeEmail(request.email);
+    const activePrincipalProfileId =
+      typeof activePrincipal?.profile_id === "string" ? activePrincipal.profile_id : null;
+    const shouldBlockApproval = Boolean(
+      activePrincipal &&
+        (!initialTargetPrincipalProfileId ||
+          activePrincipalProfileId !== initialTargetPrincipalProfileId),
+    );
+
+    console.info("[Principal approval] approval decision", {
+      selectedRequestId: request.id,
+      requestEmail: normalizedEmail,
+      schoolId: requestSchoolId,
+      duplicateRequestCount,
+      activePrincipalFound: Boolean(activePrincipal),
+      activePrincipalProfileId,
+      targetPrincipalProfileId: initialTargetPrincipalProfileId,
+      shouldBlockApproval,
+      approvalStatusBefore: request.status,
+    });
+
+    if (shouldBlockApproval) throw new Error(ACTIVE_PRINCIPAL_EXISTS_MESSAGE);
+
+    const authResult = await inviteOrResetPrincipalUser(
+      supabaseAdmin,
+      request,
+      user.id,
+      existingAuthUser,
+    );
+    const authUser = authResult.user;
 
     const { error: profileError } = await supabaseAdmin.from("profiles").upsert(
       {
@@ -1634,7 +1852,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
         table: "profiles",
         userId: user.id,
         profileId: authUser.id,
-        schoolId: school.id,
+        schoolId: requestSchoolId,
         expectedColumns: [
           "id",
           "email",
@@ -1650,7 +1868,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
     }
 
     const teacherPayload = {
-      school_id: school.id,
+      school_id: requestSchoolId,
       profile_id: authUser.id,
       level: "principal",
       status: "active",
@@ -1663,7 +1881,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
     const { data: existingPrincipalTeacher, error: existingTeacherError } = await supabaseAdmin
       .from("teachers")
       .select("id")
-      .eq("school_id", school.id)
+      .eq("school_id", requestSchoolId)
       .eq("profile_id", authUser.id)
       .eq("level", "principal")
       .limit(1)
@@ -1678,7 +1896,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
           table: "teachers",
           userId: user.id,
           profileId: authUser.id,
-          schoolId: school.id,
+          schoolId: requestSchoolId,
           expectedColumns: ["id", "school_id", "profile_id", "level"],
         },
       );
@@ -1700,7 +1918,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
             table: "teachers",
             userId: user.id,
             profileId: authUser.id,
-            schoolId: school.id,
+            schoolId: requestSchoolId,
             expectedColumns: ["school_id", "profile_id", "level", "status"],
           },
         );
@@ -1721,7 +1939,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
             table: "teachers",
             userId: user.id,
             profileId: authUser.id,
-            schoolId: school.id,
+            schoolId: requestSchoolId,
             expectedColumns: ["school_id", "profile_id", "level", "status"],
           },
         );
@@ -1729,18 +1947,22 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       }
     }
 
-    const { error: requestError } = await supabaseAdmin
+    const { data: approvedRequest, error: requestError } = await supabaseAdmin
       .from("registration_requests")
       .update({
         status: "approved",
         approved_profile_id: authUser.id,
-        approved_school_id: school.id,
+        approved_school_id: requestSchoolId,
         reviewed_by: user.id,
         reviewed_at: now,
         rejection_reason: null,
       })
       .eq("id", request.id)
-      .eq("request_type", "principal");
+      .eq("request_type", "principal")
+      .eq("approved_school_id", requestSchoolId)
+      .eq("status", "pending")
+      .select("id, status")
+      .maybeSingle();
 
     if (requestError) {
       logPrincipalServerError("[Principal approval] Registration request update failed", requestError, {
@@ -1748,7 +1970,7 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
         table: "registration_requests",
         userId: user.id,
         profileId: authUser.id,
-        schoolId: school.id,
+        schoolId: requestSchoolId,
         expectedColumns: [
           "status",
           "approved_profile_id",
@@ -1761,8 +1983,61 @@ export const reviewPrincipalRegistration = createServerFn({ method: "POST" })
       throw requestError;
     }
 
+    if (!approvedRequest) {
+      throw new Error("Selected Principal request is no longer pending.");
+    }
+
+    if (actionableDuplicateRequestIds.length > 0) {
+      const { error: duplicateCleanupError } = await supabaseAdmin
+        .from("registration_requests")
+        .update({
+          status: "rejected",
+          rejection_reason: "Duplicate request superseded by approved request.",
+          reviewed_by: user.id,
+          reviewed_at: now,
+        })
+        .eq("request_type", "principal")
+        .eq("approved_school_id", requestSchoolId)
+        .in("id", actionableDuplicateRequestIds)
+        .in("status", ["invited", "pending"]);
+
+      if (duplicateCleanupError) {
+        logPrincipalServerError(
+          "[Principal approval] Duplicate principal request cleanup failed",
+          duplicateCleanupError,
+          {
+            queryName: "principal-duplicate-request-cleanup",
+            table: "registration_requests",
+            userId: user.id,
+            profileId: authUser.id,
+            schoolId: requestSchoolId,
+            expectedColumns: ["status", "rejection_reason", "reviewed_by", "reviewed_at"],
+          },
+        );
+        throw duplicateCleanupError;
+      }
+    }
+
+    console.info("[Principal approval] approval completed", {
+      selectedRequestId: request.id,
+      requestEmail: normalizedEmail,
+      schoolId: requestSchoolId,
+      duplicateRequestCount,
+      activePrincipalFound: Boolean(activePrincipal),
+      activePrincipalProfileId,
+      targetPrincipalProfileId: authUser.id,
+      shouldBlockApproval: false,
+      approvalStatusBefore: request.status,
+      approvalStatusAfter: approvedRequest.status,
+      duplicateRequestsMarkedRejected: actionableDuplicateRequestIds.length,
+      authEmailAction: authResult.emailAction,
+    });
+
     return {
       ok: true,
-      message: `Principal account approved. Password setup email sent to ${normalizedEmail}.`,
+      message:
+        authResult.emailAction === "password_reset"
+          ? `Principal account approved. Password reset email sent to ${normalizedEmail}.`
+          : `Principal account approved. Password setup email sent to ${normalizedEmail}.`,
     };
   });
